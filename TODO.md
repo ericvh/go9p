@@ -22,6 +22,7 @@ This is a working list for the modernization effort (module + current Go) and fo
 - Expand README with:
   - Concrete end-to-end example (UFS server + client) with flags and expected output
   - Notes on 9P2000 vs 9P2000.u behavior and what `Dotu` changes
+- Make kernel-source retrieval in CI more reliable (shallow git checkout of tag in `Dockerfile.kernel9p-qemu`).
 
 ## Next
 

@@ -8,7 +8,7 @@ on:
 env:
   # Pin the kernel version so BuildKit layer caching remains stable across commits.
   # Bump this intentionally when you want to test a newer kernel.
-  KERNEL9P_LINUX_VERSION: "6.16.0"
+  KERNEL9P_LINUX_VERSION: "7.0"
 
 jobs:
   docker-test:

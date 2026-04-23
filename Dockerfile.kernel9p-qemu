@@ -9,10 +9,10 @@
 ##   docker build -f Dockerfile.kernel9p-qemu --target kernel9p-test .
 ##
 ## Override kernel version:
-##   docker build -f Dockerfile.kernel9p-qemu --target kernel9p-test --build-arg LINUX_VERSION=6.16.0 .
+##   docker build -f Dockerfile.kernel9p-qemu --target kernel9p-test --build-arg LINUX_VERSION=7.0 .
 
 ARG GO_VERSION=1.26.0
-ARG LINUX_VERSION=6.16.0
+ARG LINUX_VERSION=7.0
 ARG KERNEL_ARCH=amd64
 
 FROM golang:${GO_VERSION}-bookworm AS gotools
@@ -36,16 +36,16 @@ ARG KERNEL_ARCH
 WORKDIR /work
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl xz-utils \
+    ca-certificates git curl xz-utils \
     build-essential bc bison flex \
     libssl-dev libelf-dev \
     cpio gzip \
   && rm -rf /var/lib/apt/lists/*
 
-# Fetch kernel source (full tarball, stable releases).
-RUN curl -fsSL "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${LINUX_VERSION}.tar.xz" -o linux.tar.xz \
-  && tar -xf linux.tar.xz \
-  && mv "linux-${LINUX_VERSION}" linux
+# Fetch kernel source via shallow git checkout of the target tag.
+# This is generally more resilient in CI than downloading large tarballs.
+RUN git clone --depth 1 --branch "v${LINUX_VERSION}" --single-branch \
+    https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git linux
 
 WORKDIR /work/linux
 

@@ -114,7 +114,7 @@ Pin kernel version and/or architecture:
 
 ```bash
 docker build -f Dockerfile.kernel9p-qemu --target kernel9p-test \
-  --build-arg LINUX_VERSION=6.16.0 \
+  --build-arg LINUX_VERSION=7.0 \
   --build-arg KERNEL_ARCH=amd64 \
   .
 ```
