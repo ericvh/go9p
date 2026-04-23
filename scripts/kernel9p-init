@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+
+echo "[init] mounting proc/sys/dev..."
+mount -t proc proc /proc || true
+mount -t sysfs sys /sys || true
+mount -t devtmpfs dev /dev || true
+
+mkdir -p /mnt/9p
+
+echo "[init] mounting 9p (kernel client) via virtio..."
+# QEMU provides the server side (virtio-9p) with mount tag "hostshare".
+# Use a modern dialect where possible; the kernel will negotiate.
+mount -t 9p -o trans=virtio,version=9p2000.L,msize=262144 hostshare /mnt/9p
+
+echo "[init] running kernel9p smoke test..."
+KERNEL9P_MOUNT=/mnt/9p /kernel9p-smoke || {
+  echo "[init] smoke test failed"
+  poweroff -f || halt -f || reboot -f
+  exit 1
+}
+
+echo "[init] success; powering off"
+poweroff -f || halt -f || reboot -f
+

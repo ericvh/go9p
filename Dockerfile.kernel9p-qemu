@@ -1,0 +1,100 @@
+## QEMU + upstream Linux kernel + kernel 9p client smoke test.
+##
+## This builds:
+## - a recent Linux kernel with virtio + 9p enabled
+## - a tiny initramfs containing busybox, an init script, and the test binary
+## - then boots QEMU and runs the smoke test against a virtio-9p export
+##
+## Usage (from repo root):
+##   docker build -f Dockerfile.kernel9p-qemu --target kernel9p-test .
+##
+## Override kernel version:
+##   docker build -f Dockerfile.kernel9p-qemu --target kernel9p-test --build-arg LINUX_VERSION=6.16.0 .
+
+ARG GO_VERSION=1.26.0
+ARG LINUX_VERSION=6.16.0
+
+FROM golang:${GO_VERSION}-bookworm AS gotools
+WORKDIR /src
+COPY go.mod ./
+RUN go mod download
+COPY . .
+
+# Build a static-ish linux/amd64 test binary to run inside the guest.
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/kernel9p-smoke ./cmd/kernel9p-smoke
+
+FROM debian:bookworm AS kernel
+ARG LINUX_VERSION
+WORKDIR /work
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl xz-utils \
+    build-essential bc bison flex \
+    libssl-dev libelf-dev \
+    cpio gzip \
+  && rm -rf /var/lib/apt/lists/*
+
+# Fetch kernel source (full tarball, stable releases).
+RUN curl -fsSL "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${LINUX_VERSION}.tar.xz" -o linux.tar.xz \
+  && tar -xf linux.tar.xz \
+  && mv "linux-${LINUX_VERSION}" linux
+
+WORKDIR /work/linux
+
+# Configure a minimal kernel suitable for QEMU q35 + virtio + 9p.
+RUN make defconfig \
+  && ./scripts/config --enable CONFIG_BLK_DEV_INITRD \
+  && ./scripts/config --enable CONFIG_DEVTMPFS \
+  && ./scripts/config --enable CONFIG_DEVTMPFS_MOUNT \
+  && ./scripts/config --enable CONFIG_VIRTIO_PCI \
+  && ./scripts/config --enable CONFIG_VIRTIO_BLK \
+  && ./scripts/config --enable CONFIG_VIRTIO_NET \
+  && ./scripts/config --enable CONFIG_NET_9P \
+  && ./scripts/config --enable CONFIG_NET_9P_VIRTIO \
+  && ./scripts/config --enable CONFIG_9P_FS \
+  && ./scripts/config --enable CONFIG_9P_FS_POSIX_ACL \
+  && ./scripts/config --enable CONFIG_TMPFS \
+  && ./scripts/config --enable CONFIG_TMPFS_POSIX_ACL \
+  && make olddefconfig
+
+RUN make -j"$(nproc)" bzImage
+
+FROM debian:bookworm AS initramfs
+WORKDIR /work
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    busybox-static cpio gzip \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=gotools /out/kernel9p-smoke /rootfs/kernel9p-smoke
+COPY scripts/kernel9p-init /rootfs/init
+
+RUN chmod +x /rootfs/init /rootfs/kernel9p-smoke \
+  && mkdir -p /rootfs/bin /rootfs/sbin /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/mnt/9p \
+  && ln -s /bin/busybox /rootfs/bin/sh \
+  && (cd /rootfs && /bin/busybox --install -s bin) \
+  && (cd /rootfs && find . -print0 | cpio --null -ov --format=newc | gzip -9) > /out.cpio.gz
+
+FROM debian:bookworm AS kernel9p-test
+WORKDIR /work
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    qemu-system-x86 \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=kernel /work/linux/arch/x86/boot/bzImage /work/bzImage
+COPY --from=initramfs /out.cpio.gz /work/initramfs.cpio.gz
+COPY scripts/kernel9p-qemu-run.sh /work/run.sh
+
+RUN chmod +x /work/run.sh
+
+# The QEMU virtio-9p export directory (server side).
+RUN mkdir -p /work/share
+
+ENV OUT_DIR=/work/out
+ENV KERNEL_BZIMAGE=/work/bzImage
+ENV INITRAMFS_GZ=/work/initramfs.cpio.gz
+ENV SHARE_DIR=/work/share
+
+CMD ["/work/run.sh"]
+
