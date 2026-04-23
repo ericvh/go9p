@@ -110,6 +110,16 @@ This boots an upstream Linux kernel in QEMU, mounts a virtio-9p export using the
 docker build -f Dockerfile.kernel9p-qemu --target kernel9p-test .
 ```
 
+Select which 9P server the kernel client talks to:
+
+- **`KERNEL9P_SERVER=qemu`** (default): QEMU virtio-9p server, mounted via `trans=virtio`
+- **`KERNEL9P_SERVER=diod`**: external `diod` server over TCP (guest connects to `10.0.2.2:564`)
+
+```bash
+docker run --rm -e KERNEL9P_SERVER=qemu go9p:kernel9p-amd64
+docker run --rm -e KERNEL9P_SERVER=diod go9p:kernel9p-amd64
+```
+
 Pin kernel version and/or architecture:
 
 ```bash

@@ -23,6 +23,7 @@ This is a working list for the modernization effort (module + current Go) and fo
   - Concrete end-to-end example (UFS server + client) with flags and expected output
   - Notes on 9P2000 vs 9P2000.u behavior and what `Dotu` changes
 - Make kernel-source retrieval in CI more reliable (shallow git checkout of tag in `Dockerfile.kernel9p-qemu`).
+- Add a “pluggable server” mode to the kernel-client harness so it can target non-QEMU servers and other dialects/protocol revisions.
 
 ## Next
 
@@ -30,6 +31,6 @@ This is a working list for the modernization effort (module + current Go) and fo
 - **Tests**:
   - Add more unit coverage for pack/unpack edge cases (size bounds, malformed packets) ✅
   - Expand kernel-client smoke tests (symlinks, permissions, xattrs, error mapping, rename across dirs) ✅
-  - Add a “pluggable server” mode to the kernel-client harness so it can target non-QEMU servers and other dialects/protocol revisions
+  - Add u9fs server backend to the kernel-client harness (build from source in Docker image; optional CI coverage)
   - Reduce CI cost/time by caching or using prebuilt kernels for the QEMU job (optional) ✅
 

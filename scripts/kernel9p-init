@@ -8,10 +8,27 @@ mount -t devtmpfs dev /dev || true
 
 mkdir -p /mnt/9p
 
-echo "[init] mounting 9p (kernel client) via virtio..."
-# QEMU provides the server side (virtio-9p) with mount tag "hostshare".
-# Use a modern dialect where possible; the kernel will negotiate.
-mount -t 9p -o trans=virtio,version=9p2000.L,msize=262144 hostshare /mnt/9p
+KERNEL9P_SERVER="${KERNEL9P_SERVER:-qemu}"
+KERNEL9P_TCP_ADDR="${KERNEL9P_TCP_ADDR:-10.0.2.2}"
+KERNEL9P_TCP_PORT="${KERNEL9P_TCP_PORT:-564}"
+
+case "${KERNEL9P_SERVER}" in
+  qemu)
+    echo "[init] mounting 9p (kernel client) via virtio..."
+    # QEMU provides the server side (virtio-9p) with mount tag "hostshare".
+    # Use a modern dialect where possible; the kernel will negotiate.
+    mount -t 9p -o trans=virtio,version=9p2000.L,msize=262144 hostshare /mnt/9p
+    ;;
+  diod)
+    echo "[init] mounting 9p (kernel client) via tcp to ${KERNEL9P_TCP_ADDR}:${KERNEL9P_TCP_PORT}..."
+    mount -t 9p -o "trans=tcp,version=9p2000.L,msize=262144,port=${KERNEL9P_TCP_PORT}" "${KERNEL9P_TCP_ADDR}" /mnt/9p
+    ;;
+  *)
+    echo "[init] unknown KERNEL9P_SERVER=${KERNEL9P_SERVER} (expected qemu or diod)" >&2
+    poweroff -f || halt -f || reboot -f
+    exit 2
+    ;;
+esac
 
 echo "[init] running kernel9p smoke test..."
 KERNEL9P_MOUNT=/mnt/9p /kernel9p-smoke || {

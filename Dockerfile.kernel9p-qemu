@@ -100,7 +100,7 @@ ARG KERNEL_ARCH
 WORKDIR /work
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    qemu-system-x86 qemu-system-arm \
+    qemu-system-x86 qemu-system-arm diod \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=kernel /work/linux/arch/x86/boot/bzImage /work/bzImage

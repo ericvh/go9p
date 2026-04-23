@@ -44,15 +44,23 @@ jobs:
         run: docker run --rm go9p:${{ matrix.target }}
 
   kernel9p-qemu:
-    name: kernel9p-qemu (${{ matrix.arch }})
+    name: kernel9p-qemu (${{ matrix.arch }}, ${{ matrix.server }})
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: amd64
             runs_on: ubuntu-latest
+            server: qemu
+          - arch: amd64
+            runs_on: ubuntu-latest
+            server: diod
           - arch: arm64
             runs_on: ubuntu-24.04-arm
+            server: qemu
+          - arch: arm64
+            runs_on: ubuntu-24.04-arm
+            server: diod
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 90
 
@@ -81,6 +89,6 @@ jobs:
           cache-from: type=gha,scope=kernel9p-${{ matrix.arch }}-${{ env.KERNEL9P_LINUX_VERSION }}
           cache-to: type=gha,scope=kernel9p-${{ matrix.arch }}-${{ env.KERNEL9P_LINUX_VERSION }},mode=max
 
-      - name: Run kernel9p-test (${{ matrix.arch }})
-        run: docker run --rm go9p:kernel9p-${{ matrix.arch }}
+      - name: Run kernel9p-test (${{ matrix.arch }}, ${{ matrix.server }})
+        run: docker run --rm -e KERNEL9P_SERVER=${{ matrix.server }} go9p:kernel9p-${{ matrix.arch }}
 
