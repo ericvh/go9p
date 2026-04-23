@@ -5,6 +5,11 @@ on:
     branches: ["**"]
   pull_request:
 
+env:
+  # Pin the kernel version so BuildKit layer caching remains stable across commits.
+  # Bump this intentionally when you want to test a newer kernel.
+  KERNEL9P_LINUX_VERSION: "6.16.0"
+
 jobs:
   docker-test:
     name: docker (${{ matrix.target }})
@@ -69,10 +74,12 @@ jobs:
           target: kernel9p-test
           build-args: |
             KERNEL_ARCH=${{ matrix.arch }}
+            LINUX_VERSION=${{ env.KERNEL9P_LINUX_VERSION }}
           load: true
           tags: go9p:kernel9p-${{ matrix.arch }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Use a cache scope keyed by arch+kernel version to maximize reuse.
+          cache-from: type=gha,scope=kernel9p-${{ matrix.arch }}-${{ env.KERNEL9P_LINUX_VERSION }}
+          cache-to: type=gha,scope=kernel9p-${{ matrix.arch }}-${{ env.KERNEL9P_LINUX_VERSION }},mode=max
 
       - name: Run kernel9p-test (${{ matrix.arch }})
         run: docker run --rm go9p:kernel9p-${{ matrix.arch }}

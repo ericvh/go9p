@@ -30,5 +30,5 @@ This is a working list for the modernization effort (module + current Go) and fo
   - Add more unit coverage for pack/unpack edge cases (size bounds, malformed packets) ✅
   - Expand kernel-client smoke tests (symlinks, permissions, xattrs, error mapping, rename across dirs) ✅
   - Add a “pluggable server” mode to the kernel-client harness so it can target non-QEMU servers and other dialects/protocol revisions
-  - Reduce CI cost/time by caching or using prebuilt kernels for the QEMU job (optional)
+  - Reduce CI cost/time by caching or using prebuilt kernels for the QEMU job (optional) ✅
 
