@@ -35,7 +35,7 @@ go get github.com/lionkov/go9p@latest
 The UFS server exports a local directory tree over 9P — a landscape of your choosing, offered to the network like a silent confession:
 
 ```bash
-go run ./p/srv/examples/ufs -root .
+go run ./p/srv/examples/ufs -addr 127.0.0.1:5640
 ```
 
 ### Run a client example
@@ -47,6 +47,29 @@ go run ./p/clnt/examples/ls -addr <network address>
 ```
 
 The example programs have their own flags; run them with `-h` to see usage.
+
+### End-to-end example (UFS server + client)
+
+In one terminal, you begin the export — a local directory tree offered up across the wire:
+
+```bash
+go run ./p/srv/examples/ufs -addr 127.0.0.1:5640 -root .
+```
+
+In another terminal, you ask for the root directory, and it answers with names, one per line:
+
+```bash
+go run ./p/clnt/examples/ls -addr 127.0.0.1:5640 /
+```
+
+Expected output, for example:
+
+```text
+.git
+LICENSE
+p
+README.md
+```
 
 ## Testing
 

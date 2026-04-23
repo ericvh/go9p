@@ -15,6 +15,19 @@ This repository is the upstream `github.com/lionkov/go9p`.
 - **Protocol**: 9P2000 with optional 9P2000.u fields (see `Dotu` usage in server/client code).
 - **Go**: This forked branch adds a Go module and is intended to work with modern Go toolchains.
 
+### 9P2000 vs 9P2000.u (`Dotu`)
+
+- **9P2000**: the “base” protocol.
+- **9P2000.u**: an extension that adds (among other things) numeric uid/gid fields and Unix-y metadata (see `Dir.Uidnum`, `Dir.Gidnum`, and related fields in `package p`).
+
+In this codebase you’ll see a boolean called **`Dotu`** on both client and server types. In practice:
+
+- **Server**: `Srv.Dotu` indicates the server *can* speak 9P2000.u.
+- **Client**: `Clnt.Dotu` indicates the client *wants* to speak 9P2000.u.
+- The negotiated connection behavior is exposed as `Conn.Dotu` (server side) based on the `Tversion`/`Rversion` handshake.
+
+If you’re targeting the **Linux kernel 9p client**, it most commonly uses the `9p2000.L` family (a different dialect from 9P2000.u). This repository’s code supports 9P2000 and 9P2000.u; the QEMU kernel-client harness in this fork validates kernel-client behavior against QEMU’s virtio-9p server rather than validating dialect parity with go9p itself.
+
 ## Install (module mode)
 
 This repository is now module-enabled:
@@ -30,7 +43,7 @@ go get github.com/lionkov/go9p@latest
 The UFS server exports a local directory tree over 9P:
 
 ```bash
-go run ./p/srv/examples/ufs -root .
+go run ./p/srv/examples/ufs -addr 127.0.0.1:5640
 ```
 
 ### Run a client example
@@ -42,6 +55,29 @@ go run ./p/clnt/examples/ls -addr <network address>
 ```
 
 The example programs have their own flags; run them with `-h` to see usage.
+
+### End-to-end example (UFS server + client)
+
+In one terminal, run a server exporting a local directory tree:
+
+```bash
+go run ./p/srv/examples/ufs -addr 127.0.0.1:5640 -root .
+```
+
+In another terminal, list the root directory via 9P:
+
+```bash
+go run ./p/clnt/examples/ls -addr 127.0.0.1:5640 /
+```
+
+Expected output is one name per line, for example:
+
+```text
+.git
+LICENSE
+p
+README.md
+```
 
 ## Testing
 
