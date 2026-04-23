@@ -19,13 +19,13 @@ This is a working list for the modernization effort (module + current Go) and fo
 - Add QEMU harness to validate the **Linux kernel 9p client** against QEMU virtio-9p server (`Dockerfile.kernel9p-qemu`).
 - Run the kernel-client harness in CI on **amd64** and **arm64** GitHub-hosted runners.
 - Maintain `HERZOG.md` as an AI-generated stylistic mirror of `README.md` (CI-enforced).
+- Expand README with:
+  - Concrete end-to-end example (UFS server + client) with flags and expected output
+  - Notes on 9P2000 vs 9P2000.u behavior and what `Dotu` changes
 
 ## Next
 
 - **Add `go.sum` if/when dependencies are introduced** (currently the module has no external requirements).
-- **Docs**:
-  - Expand README with a concrete end-to-end example (server + client) including flags and expected output
-  - Document 9P2000 vs 9P2000.u behavior and what `Dotu` changes
 - **Tests**:
   - Add more unit coverage for pack/unpack edge cases (size bounds, malformed packets)
   - Expand kernel-client smoke tests (symlinks, permissions, xattrs, error mapping, rename across dirs)
