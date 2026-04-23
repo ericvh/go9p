@@ -21,6 +21,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Check HERZOG.md mirrors README.md
+        run: bash ./scripts/check-herzog-sync.sh
+
       - name: Build ${{ matrix.target }} image
         uses: docker/build-push-action@v6
         with:
@@ -54,6 +57,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Check HERZOG.md mirrors README.md
+        run: bash ./scripts/check-herzog-sync.sh
 
       - name: Build kernel9p-test image (${{ matrix.arch }})
         uses: docker/build-push-action@v6
