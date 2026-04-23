@@ -13,18 +13,26 @@
 
 ARG GO_VERSION=1.26.0
 ARG LINUX_VERSION=6.16.0
+ARG KERNEL_ARCH=amd64
 
 FROM golang:${GO_VERSION}-bookworm AS gotools
+ARG KERNEL_ARCH
 WORKDIR /src
 COPY go.mod ./
 RUN go mod download
 COPY . .
 
-# Build a static-ish linux/amd64 test binary to run inside the guest.
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/kernel9p-smoke ./cmd/kernel9p-smoke
+# Build a static-ish linux binary to run inside the guest.
+RUN case "${KERNEL_ARCH}" in \
+      amd64) GOARCH=amd64 ;; \
+      arm64) GOARCH=arm64 ;; \
+      *) echo "unsupported KERNEL_ARCH=${KERNEL_ARCH}" >&2; exit 2 ;; \
+    esac \
+  && CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH}" go build -o /out/kernel9p-smoke ./cmd/kernel9p-smoke
 
 FROM debian:bookworm AS kernel
 ARG LINUX_VERSION
+ARG KERNEL_ARCH
 WORKDIR /work
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -41,8 +49,12 @@ RUN curl -fsSL "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${LINUX_VERSI
 
 WORKDIR /work/linux
 
-# Configure a minimal kernel suitable for QEMU q35 + virtio + 9p.
-RUN make defconfig \
+# Configure a minimal kernel suitable for QEMU + virtio + 9p.
+RUN if [ "${KERNEL_ARCH}" = "arm64" ]; then \
+      make ARCH=arm64 defconfig ; \
+    else \
+      make defconfig ; \
+    fi \
   && ./scripts/config --enable CONFIG_BLK_DEV_INITRD \
   && ./scripts/config --enable CONFIG_DEVTMPFS \
   && ./scripts/config --enable CONFIG_DEVTMPFS_MOUNT \
@@ -55,9 +67,17 @@ RUN make defconfig \
   && ./scripts/config --enable CONFIG_9P_FS_POSIX_ACL \
   && ./scripts/config --enable CONFIG_TMPFS \
   && ./scripts/config --enable CONFIG_TMPFS_POSIX_ACL \
-  && make olddefconfig
+  && if [ "${KERNEL_ARCH}" = "arm64" ]; then \
+       make ARCH=arm64 olddefconfig ; \
+     else \
+       make olddefconfig ; \
+     fi
 
-RUN make -j"$(nproc)" bzImage
+RUN if [ "${KERNEL_ARCH}" = "arm64" ]; then \
+      make ARCH=arm64 -j"$(nproc)" Image ; \
+    else \
+      make -j"$(nproc)" bzImage ; \
+    fi
 
 FROM debian:bookworm AS initramfs
 WORKDIR /work
@@ -76,13 +96,15 @@ RUN chmod +x /rootfs/init /rootfs/kernel9p-smoke \
   && (cd /rootfs && find . -print0 | cpio --null -ov --format=newc | gzip -9) > /out.cpio.gz
 
 FROM debian:bookworm AS kernel9p-test
+ARG KERNEL_ARCH
 WORKDIR /work
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    qemu-system-x86 \
+    qemu-system-x86 qemu-system-arm \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=kernel /work/linux/arch/x86/boot/bzImage /work/bzImage
+COPY --from=kernel /work/linux/arch/arm64/boot/Image /work/Image
 COPY --from=initramfs /out.cpio.gz /work/initramfs.cpio.gz
 COPY scripts/kernel9p-qemu-run.sh /work/run.sh
 
@@ -93,6 +115,8 @@ RUN mkdir -p /work/share
 
 ENV OUT_DIR=/work/out
 ENV KERNEL_BZIMAGE=/work/bzImage
+ENV KERNEL_IMAGE=/work/Image
+ENV KERNEL_ARCH=${KERNEL_ARCH}
 ENV INITRAMFS_GZ=/work/initramfs.cpio.gz
 ENV SHARE_DIR=/work/share
 

@@ -8,16 +8,35 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${OUT_DIR:-${ROOT_DIR}/.kernel9p-out}"
 
+KERNEL_ARCH="${KERNEL_ARCH:-amd64}"
 KERNEL_BZIMAGE="${KERNEL_BZIMAGE:-${OUT_DIR}/linux/arch/x86/boot/bzImage}"
+KERNEL_IMAGE="${KERNEL_IMAGE:-${OUT_DIR}/linux/arch/arm64/boot/Image}"
 INITRAMFS_GZ="${INITRAMFS_GZ:-${OUT_DIR}/initramfs.cpio.gz}"
 SHARE_DIR="${SHARE_DIR:-${OUT_DIR}/share}"
 
-QEMU_BIN="${QEMU_BIN:-qemu-system-x86_64}"
-
 mkdir -p "${OUT_DIR}" "${SHARE_DIR}"
 
-if [[ ! -f "${KERNEL_BZIMAGE}" ]]; then
-  echo "Missing kernel bzImage at ${KERNEL_BZIMAGE}" >&2
+case "${KERNEL_ARCH}" in
+  amd64)
+    QEMU_BIN="${QEMU_BIN:-qemu-system-x86_64}"
+    KERNEL_PATH="${KERNEL_BZIMAGE}"
+    CONSOLE="ttyS0"
+    MACHINE_ARGS=(-machine q35 -cpu max -device virtio-rng-pci -device virtio-9p-pci,fsdev=fsdev0,mount_tag=hostshare)
+    ;;
+  arm64)
+    QEMU_BIN="${QEMU_BIN:-qemu-system-aarch64}"
+    KERNEL_PATH="${KERNEL_IMAGE}"
+    CONSOLE="ttyAMA0"
+    MACHINE_ARGS=(-machine virt -cpu cortex-a57 -device virtio-rng-device -device virtio-9p-device,fsdev=fsdev0,mount_tag=hostshare)
+    ;;
+  *)
+    echo "Unsupported KERNEL_ARCH=${KERNEL_ARCH} (expected amd64 or arm64)" >&2
+    exit 2
+    ;;
+esac
+
+if [[ ! -f "${KERNEL_PATH}" ]]; then
+  echo "Missing kernel image at ${KERNEL_PATH}" >&2
   exit 2
 fi
 if [[ ! -f "${INITRAMFS_GZ}" ]]; then
@@ -31,14 +50,13 @@ echo "Starting QEMU kernel9p test..."
   -nodefaults \
   -no-reboot \
   -m 1024 \
-  -cpu max \
-  -machine q35 \
+  -smp 1 \
+  -accel tcg \
   -serial mon:stdio \
   -nographic \
-  -kernel "${KERNEL_BZIMAGE}" \
+  -kernel "${KERNEL_PATH}" \
   -initrd "${INITRAMFS_GZ}" \
-  -append "console=ttyS0 panic=1 oops=panic loglevel=7" \
-  -device virtio-rng-pci \
+  -append "console=${CONSOLE} panic=1 oops=panic loglevel=7" \
   -fsdev local,id=fsdev0,path="${SHARE_DIR}",security_model=none \
-  -device virtio-9p-pci,fsdev=fsdev0,mount_tag=hostshare
+  "${MACHINE_ARGS[@]}"
 
