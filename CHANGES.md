@@ -21,5 +21,6 @@ This file tracks notable changes on the `ericvh/go9p` fork branches (not upstrea
   - UFS-backed e2e test in `p/clnt`
   - Fsrv synthetic-tree e2e test in `p/srv`
 - Add QEMU-based Linux kernel 9p client smoke test (`Dockerfile.kernel9p-qemu`) and run it in CI on amd64/arm64.
+- Kernel-client harness: pluggable 9P servers (**QEMU virtio-9p**, **`diod` over TCP**, **`u9fs` over TCP via `socat`**); guest reads `kernel9p.*` from the kernel command line. CI exercises all three backends on amd64 and arm64.
 - Add `HERZOG.md` as an AI-generated stylistic mirror of `README.md`, with CI enforcement to keep headings in sync.
 

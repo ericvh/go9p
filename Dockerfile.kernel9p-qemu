@@ -97,11 +97,23 @@ RUN chmod +x /rootfs/init /rootfs/kernel9p-smoke \
 
 FROM debian:bookworm AS kernel9p-test
 ARG KERNEL_ARCH
+# Pinned u9fs commit (unofficial-mirror/u9fs) for reproducible builds.
+ARG U9FS_COMMIT=d65923fd17e8b158350d3ccd6a4e32b89b15014a
 WORKDIR /work
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    qemu-system-x86 qemu-system-arm diod \
-  && rm -rf /var/lib/apt/lists/*
+    qemu-system-x86 qemu-system-arm \
+    diod socat \
+    ca-certificates git make gcc libc6-dev \
+  && rm -rf /var/lib/apt/lists/* \
+  && git init /tmp/u9fs \
+  && cd /tmp/u9fs \
+  && git remote add origin https://github.com/unofficial-mirror/u9fs.git \
+  && git fetch --depth 1 origin "${U9FS_COMMIT}" \
+  && git checkout FETCH_HEAD \
+  && make \
+  && install -m0755 u9fs /usr/local/bin/u9fs \
+  && rm -rf /tmp/u9fs
 
 COPY --from=kernel /work/linux/arch/x86/boot/bzImage /work/bzImage
 COPY --from=kernel /work/linux/arch/arm64/boot/Image /work/Image

@@ -2,8 +2,14 @@
 set -euo pipefail
 
 # Runs a Linux kernel under QEMU and validates the kernel 9p client by
-# mounting a virtio-9p export (QEMU's built-in server) and executing a
-# small test binary inside the guest.
+# mounting a 9P export and executing a small test binary inside the guest.
+#
+# Select backend with KERNEL9P_SERVER:
+#   qemu  - QEMU virtio-9p (default)
+#   diod  - external diod over TCP (runs in this container)
+#   u9fs  - external u9fs over TCP via socat (runs in this container)
+#
+# The guest reads kernel9p.* parameters from /proc/cmdline (see scripts/kernel9p-init).
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${OUT_DIR:-${ROOT_DIR}/.kernel9p-out}"
@@ -14,7 +20,8 @@ KERNEL_IMAGE="${KERNEL_IMAGE:-${OUT_DIR}/linux/arch/arm64/boot/Image}"
 INITRAMFS_GZ="${INITRAMFS_GZ:-${OUT_DIR}/initramfs.cpio.gz}"
 SHARE_DIR="${SHARE_DIR:-${OUT_DIR}/share}"
 
-KERNEL9P_SERVER="${KERNEL9P_SERVER:-qemu}" # qemu | diod
+KERNEL9P_SERVER="${KERNEL9P_SERVER:-qemu}" # qemu | diod | u9fs
+KERNEL9P_TCP_ADDR="${KERNEL9P_TCP_ADDR:-10.0.2.2}"
 KERNEL9P_TCP_PORT="${KERNEL9P_TCP_PORT:-564}"
 
 mkdir -p "${OUT_DIR}" "${SHARE_DIR}"
@@ -51,7 +58,7 @@ if [[ ! -f "${INITRAMFS_GZ}" ]]; then
   exit 2
 fi
 
-echo "Starting QEMU kernel9p test..."
+echo "Starting QEMU kernel9p test (server=${KERNEL9P_SERVER})..."
 
 "${QEMU_BIN}" --version >/dev/null 2>&1 || {
   echo "Missing QEMU binary at ${QEMU_BIN}" >&2
@@ -59,11 +66,19 @@ echo "Starting QEMU kernel9p test..."
 }
 
 cleanup() {
+  if [[ -n "${SOCAT_PID:-}" ]]; then
+    kill "${SOCAT_PID}" >/dev/null 2>&1 || true
+  fi
   if [[ -n "${DIOD_PID:-}" ]]; then
     kill "${DIOD_PID}" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
+
+KERNEL_APPEND="console=${CONSOLE} panic=1 oops=panic loglevel=7"
+KERNEL_APPEND+=" kernel9p.server=${KERNEL9P_SERVER}"
+KERNEL_APPEND+=" kernel9p.tcp=${KERNEL9P_TCP_ADDR}"
+KERNEL_APPEND+=" kernel9p.port=${KERNEL9P_TCP_PORT}"
 
 QEMU_ARGS=(
   -nodefaults
@@ -75,7 +90,7 @@ QEMU_ARGS=(
   -nographic
   -kernel "${KERNEL_PATH}"
   -initrd "${INITRAMFS_GZ}"
-  -append "console=${CONSOLE} panic=1 oops=panic loglevel=7"
+  -append "${KERNEL_APPEND}"
   "${MACHINE_ARGS_BASE[@]}"
 )
 
@@ -91,16 +106,32 @@ case "${KERNEL9P_SERVER}" in
       echo "Missing diod; install it or use KERNEL9P_SERVER=qemu" >&2
       exit 2
     fi
-    echo "Starting diod 9p server on 0.0.0.0:${KERNEL9P_TCP_PORT} exporting ${SHARE_DIR}..."
+    echo "Starting diod on 0.0.0.0:${KERNEL9P_TCP_PORT} exporting ${SHARE_DIR}..."
     diod --listen="0.0.0.0:${KERNEL9P_TCP_PORT}" --no-auth --export="${SHARE_DIR}" >/dev/null 2>&1 &
     DIOD_PID="$!"
     QEMU_ARGS+=("${NETDEV_ARGS[@]}")
     ;;
+  u9fs)
+    if ! command -v socat >/dev/null 2>&1; then
+      echo "Missing socat (required for u9fs TCP mode)" >&2
+      exit 2
+    fi
+    U9FS_BIN=/usr/local/bin/u9fs
+    if [[ ! -x "${U9FS_BIN}" ]]; then
+      echo "Missing u9fs at ${U9FS_BIN}" >&2
+      exit 2
+    fi
+    echo "Starting u9fs (via socat) on 0.0.0.0:${KERNEL9P_TCP_PORT} exporting ${SHARE_DIR}..."
+    # u9fs speaks 9P on stdio; socat forks a fresh u9fs per TCP connection.
+    socat TCP-LISTEN:"${KERNEL9P_TCP_PORT}",reuseaddr,fork \
+      SYSTEM:"exec ${U9FS_BIN} -n -a none -u root ${SHARE_DIR}" >/dev/null 2>&1 &
+    SOCAT_PID="$!"
+    QEMU_ARGS+=("${NETDEV_ARGS[@]}")
+    ;;
   *)
-    echo "Unsupported KERNEL9P_SERVER=${KERNEL9P_SERVER} (expected qemu or diod)" >&2
+    echo "Unsupported KERNEL9P_SERVER=${KERNEL9P_SERVER} (expected qemu, diod, or u9fs)" >&2
     exit 2
     ;;
 esac
 
 "${QEMU_BIN}" "${QEMU_ARGS[@]}"
-

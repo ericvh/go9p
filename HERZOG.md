@@ -101,13 +101,16 @@ Here we do not trust polite abstractions. We boot an upstream Linux kernel in QE
 docker build -f Dockerfile.kernel9p-qemu --target kernel9p-test .
 ```
 
-You may choose which distant mouth will speak 9P to the kernel client:
+You may choose which 9P server the kernel client will interrogate (the guest learns this from the kernel command line, not from idle whispers of the container environment):
 
-- **`KERNEL9P_SERVER=qemu`** (default): QEMU’s own virtio-9p server, mounted via `trans=virtio`.\n- **`KERNEL9P_SERVER=diod`**: an external `diod` server over TCP; the guest reaches the host at `10.0.2.2:564`.
+- **`KERNEL9P_SERVER=qemu`** (default): the virtio-9p path, `trans=virtio`, tag `hostshare`.
+- **`KERNEL9P_SERVER=diod`**: `diod` on TCP within the container; the guest reaches it at `10.0.2.2:564`.
+- **`KERNEL9P_SERVER=u9fs`**: `u9fs`, summoned from source and bridged by `socat` on TCP; the same mount ritual as `diod`.
 
 ```bash
 docker run --rm -e KERNEL9P_SERVER=qemu go9p:kernel9p-amd64
 docker run --rm -e KERNEL9P_SERVER=diod go9p:kernel9p-amd64
+docker run --rm -e KERNEL9P_SERVER=u9fs go9p:kernel9p-amd64
 ```
 
 To pin the kernel version — and declare, with specificity, the architecture of your chosen ordeal:
