@@ -28,7 +28,7 @@ This is a working list for the modernization effort (module + current Go) and fo
 - **Add `go.sum` if/when dependencies are introduced** (currently the module has no external requirements).
 - **Tests**:
   - Add more unit coverage for pack/unpack edge cases (size bounds, malformed packets) ✅
-  - Expand kernel-client smoke tests (symlinks, permissions, xattrs, error mapping, rename across dirs)
+  - Expand kernel-client smoke tests (symlinks, permissions, xattrs, error mapping, rename across dirs) ✅
   - Add a “pluggable server” mode to the kernel-client harness so it can target non-QEMU servers and other dialects/protocol revisions
   - Reduce CI cost/time by caching or using prebuilt kernels for the QEMU job (optional)
 
