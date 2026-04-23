@@ -49,14 +49,48 @@ The example programs have their own flags; run them with `-h` to see usage.
 go test ./...
 ```
 
+### Docker (Linux) tests
+
+Run the full test suite under Linux from macOS/Windows:
+
+```bash
+docker build -t go9p:test --target test .
+docker run --rm go9p:test
+```
+
+Optional race run:
+
+```bash
+docker build -t go9p:race --target race .
+docker run --rm go9p:race
+```
+
+### Kernel 9P client smoke test (QEMU)
+
+This boots an upstream Linux kernel in QEMU, mounts a virtio-9p export using the
+**kernel 9p client**, and runs a smoke test against that mount.
+
+```bash
+docker build -f Dockerfile.kernel9p-qemu --target kernel9p-test .
+```
+
+Pin kernel version and/or architecture:
+
+```bash
+docker build -f Dockerfile.kernel9p-qemu --target kernel9p-test \
+  --build-arg LINUX_VERSION=6.16.0 \
+  --build-arg KERNEL_ARCH=amd64 \
+  .
+```
+
 ## Repository layout
 
 - `p/`: core protocol + helpers (`package p`)
 - `p/clnt/`: client implementation
 - `p/srv/`: server framework
 - `p/srv/ufs/`: Unix filesystem server
+- `cmd/kernel9p-smoke/`: guest-side smoke test used by the QEMU kernel-client harness
 
 ## License
 
 BSD-style license; see `LICENSE`.
-
