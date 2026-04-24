@@ -44,29 +44,17 @@ jobs:
         run: docker run --rm go9p:${{ matrix.target }}
 
   kernel9p-qemu:
-    name: kernel9p-qemu (${{ matrix.arch }}, ${{ matrix.server }})
+    # One image build per CPU architecture; reuse it for all 9P server backends.
+    # (Previously each server×arch matrix row rebuilt the kernel — very expensive.)
+    name: kernel9p-qemu (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: amd64
             runs_on: ubuntu-latest
-            server: qemu
-          - arch: amd64
-            runs_on: ubuntu-latest
-            server: diod
-          - arch: amd64
-            runs_on: ubuntu-latest
-            server: u9fs
           - arch: arm64
             runs_on: ubuntu-24.04-arm
-            server: qemu
-          - arch: arm64
-            runs_on: ubuntu-24.04-arm
-            server: diod
-          - arch: arm64
-            runs_on: ubuntu-24.04-arm
-            server: u9fs
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 90
 
@@ -99,6 +87,12 @@ jobs:
           cache-from: type=gha,scope=kernel9p-${{ matrix.arch }}-${{ env.KERNEL9P_LINUX_VERSION }}
           cache-to: type=gha,scope=kernel9p-${{ matrix.arch }}-${{ env.KERNEL9P_LINUX_VERSION }},mode=max
 
-      - name: Run kernel9p-test (${{ matrix.arch }}, ${{ matrix.server }})
-        run: docker run --rm --platform linux/${{ matrix.arch }} -e KERNEL9P_SERVER=${{ matrix.server }} go9p:kernel9p-${{ matrix.arch }}
+      - name: Run kernel9p-test (${{ matrix.arch }}, qemu)
+        run: docker run --rm --platform linux/${{ matrix.arch }} -e KERNEL9P_SERVER=qemu go9p:kernel9p-${{ matrix.arch }}
+
+      - name: Run kernel9p-test (${{ matrix.arch }}, diod)
+        run: docker run --rm --platform linux/${{ matrix.arch }} -e KERNEL9P_SERVER=diod go9p:kernel9p-${{ matrix.arch }}
+
+      - name: Run kernel9p-test (${{ matrix.arch }}, u9fs)
+        run: docker run --rm --platform linux/${{ matrix.arch }} -e KERNEL9P_SERVER=u9fs go9p:kernel9p-${{ matrix.arch }}
 

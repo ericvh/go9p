@@ -23,7 +23,8 @@ This is a working list for the modernization effort (module + current Go) and fo
   - Concrete end-to-end example (UFS server + client) with flags and expected output
   - Notes on 9P2000 vs 9P2000.u behavior and what `Dotu` changes
 - Make kernel-source retrieval in CI more reliable (shallow git checkout of tag in `Dockerfile.kernel9p-qemu`).
-- Pluggable kernel-client 9P server backends: QEMU virtio-9p, `diod` (TCP), `u9fs` (TCP via `socat`); guest selection via `kernel9p.*` kernel cmdline.
+- Pluggable kernel-client 9P backends (`qemu`, `diod`, `u9fs`) with guest config via kernel cmdline.
+- CI: kernel9p job builds the test image **once per arch** per run, then runs all server backends against it (plus BuildKit GHA cache across commits).
 
 ## Next
 
@@ -31,6 +32,6 @@ This is a working list for the modernization effort (module + current Go) and fo
 - **Tests**:
   - Add more unit coverage for pack/unpack edge cases (size bounds, malformed packets) ✅
   - Expand kernel-client smoke tests (symlinks, permissions, xattrs, error mapping, rename across dirs) ✅
-  - Add more kernel-client server backends (e.g. custom command, different 9P dialect flags) and optional matrix tuning for CI cost
+  - Optional: split kernel9p server runs into parallel jobs again if wall-clock time matters more than kernel compile duplication
   - Reduce CI cost/time by caching or using prebuilt kernels for the QEMU job (optional) ✅
 
