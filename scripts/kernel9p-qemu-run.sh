@@ -5,9 +5,10 @@ set -euo pipefail
 # mounting a 9P export and executing a small test binary inside the guest.
 #
 # Select backend with KERNEL9P_SERVER:
-#   qemu  - QEMU virtio-9p (default)
-#   diod  - external diod over TCP (runs in this container)
-#   u9fs  - external u9fs over TCP via socat (runs in this container)
+#   qemu       - QEMU virtio-9p (default)
+#   diod       - external diod over TCP (runs in this container)
+#   u9fs       - external u9fs over TCP via socat (runs in this container)
+#   go9p-ufs   - go9p UFS server over TCP (runs in this container)
 #
 # The guest reads kernel9p.* parameters from /proc/cmdline (see scripts/kernel9p-init).
 
@@ -20,7 +21,7 @@ KERNEL_IMAGE="${KERNEL_IMAGE:-${OUT_DIR}/linux/arch/arm64/boot/Image}"
 INITRAMFS_GZ="${INITRAMFS_GZ:-${OUT_DIR}/initramfs.cpio.gz}"
 SHARE_DIR="${SHARE_DIR:-${OUT_DIR}/share}"
 
-KERNEL9P_SERVER="${KERNEL9P_SERVER:-qemu}" # qemu | diod | u9fs
+KERNEL9P_SERVER="${KERNEL9P_SERVER:-qemu}" # qemu | diod | u9fs | go9p-ufs
 KERNEL9P_TCP_ADDR="${KERNEL9P_TCP_ADDR:-10.0.2.2}"
 KERNEL9P_TCP_PORT="${KERNEL9P_TCP_PORT:-564}"
 
@@ -72,6 +73,9 @@ cleanup() {
   if [[ -n "${DIOD_PID:-}" ]]; then
     kill "${DIOD_PID}" >/dev/null 2>&1 || true
   fi
+  if [[ -n "${GO9P_PID:-}" ]]; then
+    kill "${GO9P_PID}" >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT
 
@@ -122,16 +126,26 @@ case "${KERNEL9P_SERVER}" in
       exit 2
     fi
     echo "Starting u9fs (via socat) on 0.0.0.0:${KERNEL9P_TCP_PORT} exporting ${SHARE_DIR}..."
-    # u9fs speaks 9P on stdio; socat forks a fresh u9fs per TCP connection.
     socat TCP-LISTEN:"${KERNEL9P_TCP_PORT}",reuseaddr,fork \
       SYSTEM:"exec ${U9FS_BIN} -n -a none -u root ${SHARE_DIR}" >/dev/null 2>&1 &
     SOCAT_PID="$!"
     QEMU_ARGS+=("${NETDEV_ARGS[@]}")
     ;;
+  go9p-ufs)
+    if [[ ! -x /work/go9p-ufs ]]; then
+      echo "Missing /work/go9p-ufs (go9p UFS server)" >&2
+      exit 2
+    fi
+    echo "Starting go9p ufs server on 0.0.0.0:${KERNEL9P_TCP_PORT}..."
+    /work/go9p-ufs -addr "0.0.0.0:${KERNEL9P_TCP_PORT}" >/dev/null 2>&1 &
+    GO9P_PID="$!"
+    QEMU_ARGS+=("${NETDEV_ARGS[@]}")
+    ;;
   *)
-    echo "Unsupported KERNEL9P_SERVER=${KERNEL9P_SERVER} (expected qemu, diod, or u9fs)" >&2
+    echo "Unsupported KERNEL9P_SERVER=${KERNEL9P_SERVER} (expected qemu, diod, u9fs, or go9p-ufs)" >&2
     exit 2
     ;;
 esac
 
 "${QEMU_BIN}" "${QEMU_ARGS[@]}"
+

@@ -28,7 +28,8 @@ RUN case "${KERNEL_ARCH}" in \
       arm64) GOARCH=arm64 ;; \
       *) echo "unsupported KERNEL_ARCH=${KERNEL_ARCH}" >&2; exit 2 ;; \
     esac \
-  && CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH}" go build -o /out/kernel9p-smoke ./cmd/kernel9p-smoke
+  && CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH}" go build -o /out/kernel9p-smoke ./cmd/kernel9p-smoke \
+  && CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH}" go build -o /out/go9p-ufs ./p/srv/examples/ufs
 
 FROM debian:bookworm AS kernel
 ARG LINUX_VERSION
@@ -79,6 +80,23 @@ RUN if [ "${KERNEL_ARCH}" = "arm64" ]; then \
       make -j"$(nproc)" bzImage ; \
     fi
 
+# Prebuilt kernel from v9fs/test GitHub releases.
+FROM debian:bookworm AS kernel-v9fs
+ARG KERNEL_ARCH
+ARG V9FS_TEST_KERNEL_TAG=kernel-main
+WORKDIR /work
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/* \
+  && case "${KERNEL_ARCH}" in \
+      arm64) asset="Image" ;; \
+      amd64) asset="bzImage" ;; \
+      *) echo "unsupported KERNEL_ARCH=${KERNEL_ARCH}" >&2; exit 2 ;; \
+    esac \
+  && curl -fsSL "https://github.com/v9fs/test/releases/download/${V9FS_TEST_KERNEL_TAG}/${asset}" -o "/work/${asset}" \
+  # Ensure both paths exist so downstream COPY steps don't need conditionals.
+  && if [ "${asset}" = "Image" ]; then : > /work/bzImage; else : > /work/Image; fi
+
 FROM debian:bookworm AS initramfs
 WORKDIR /work
 
@@ -95,7 +113,7 @@ RUN chmod +x /rootfs/init /rootfs/kernel9p-smoke \
   && (cd /rootfs && /bin/busybox --install -s bin) \
   && (cd /rootfs && find . -print0 | cpio --null -ov --format=newc | gzip -9) > /out.cpio.gz
 
-FROM debian:bookworm AS kernel9p-test
+FROM debian:bookworm AS kernel9p-runtime
 ARG KERNEL_ARCH
 # Pinned u9fs commit (unofficial-mirror/u9fs) for reproducible builds.
 ARG U9FS_COMMIT=d65923fd17e8b158350d3ccd6a4e32b89b15014a
@@ -115,22 +133,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && install -m0755 u9fs /usr/local/bin/u9fs \
   && rm -rf /tmp/u9fs
 
-COPY --from=kernel /work/linux/arch/x86/boot/bzImage /work/bzImage
-COPY --from=kernel /work/linux/arch/arm64/boot/Image /work/Image
 COPY --from=initramfs /out.cpio.gz /work/initramfs.cpio.gz
 COPY scripts/kernel9p-qemu-run.sh /work/run.sh
+COPY --from=gotools /out/go9p-ufs /work/go9p-ufs
 
-RUN chmod +x /work/run.sh
+RUN chmod +x /work/run.sh /work/go9p-ufs
 
 # The QEMU virtio-9p export directory (server side).
 RUN mkdir -p /work/share
 
 ENV OUT_DIR=/work/out
-ENV KERNEL_BZIMAGE=/work/bzImage
-ENV KERNEL_IMAGE=/work/Image
 ENV KERNEL_ARCH=${KERNEL_ARCH}
 ENV INITRAMFS_GZ=/work/initramfs.cpio.gz
 ENV SHARE_DIR=/work/share
 
 CMD ["/work/run.sh"]
+
+FROM kernel9p-runtime AS kernel9p-test
+COPY --from=kernel /work/linux/arch/x86/boot/bzImage /work/bzImage
+COPY --from=kernel /work/linux/arch/arm64/boot/Image /work/Image
+ENV KERNEL_BZIMAGE=/work/bzImage
+ENV KERNEL_IMAGE=/work/Image
+
+FROM kernel9p-runtime AS kernel9p-test-v9fs
+ARG KERNEL_ARCH
+ARG V9FS_TEST_KERNEL_TAG=kernel-main
+
+COPY --from=kernel-v9fs /work/Image /work/Image
+COPY --from=kernel-v9fs /work/bzImage /work/bzImage
+ENV KERNEL_BZIMAGE=/work/bzImage
+ENV KERNEL_IMAGE=/work/Image
 
