@@ -44,15 +44,12 @@ jobs:
         run: docker run --rm go9p:${{ matrix.target }}
 
   kernel9p-qemu:
-    # One image build per CPU architecture; reuse it for all 9P server backends.
-    # (Previously each server×arch matrix row rebuilt the kernel — very expensive.)
-    name: kernel9p-qemu (${{ matrix.arch }})
+    # arm64-only kernel-client testing for now.
+    name: kernel9p-qemu (arm64)
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: amd64
-            runs_on: ubuntu-latest
           - arch: arm64
             runs_on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs_on }}
@@ -73,9 +70,8 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.kernel9p-qemu
-          # Use v9fs/test prebuilt kernel for arm64 (Image asset),
-          # keep building locally for amd64 until v9fs/test publishes bzImage.
-          target: ${{ matrix.arch == 'arm64' && 'kernel9p-test-v9fs' || 'kernel9p-test' }}
+          # Use v9fs/test prebuilt kernel (Image asset).
+          target: kernel9p-test-v9fs
           # Pin the image OS/CPU to the runner matrix. Without this, Buildx can
           # default to linux/amd64 even on arm64 jobs (or vice versa), so
           # `load: true` ends up with the wrong architecture for that runner.

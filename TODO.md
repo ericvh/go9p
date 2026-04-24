@@ -17,7 +17,7 @@ This is a working list for the modernization effort (module + current Go) and fo
   - `p/srv/e2e_fsrv_test.go` (Fsrv synthetic tree)
 - Add GitHub Actions CI that runs Docker-based tests on push/PR.
 - Add QEMU harness to validate the **Linux kernel 9p client** against QEMU virtio-9p server (`Dockerfile.kernel9p-qemu`).
-- Run the kernel-client harness in CI on **amd64** and **arm64** GitHub-hosted runners.
+- Run the kernel-client harness in CI on **arm64** GitHub-hosted runners (dropping amd64 for now).
 - Maintain `HERZOG.md` as an AI-generated stylistic mirror of `README.md` (CI-enforced).
 - Expand README with:
   - Concrete end-to-end example (UFS server + client) with flags and expected output
