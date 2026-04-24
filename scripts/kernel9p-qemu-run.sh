@@ -18,7 +18,7 @@ OUT_DIR="${OUT_DIR:-${ROOT_DIR}/.kernel9p-out}"
 KERNEL_ARCH="${KERNEL_ARCH:-amd64}"
 KERNEL_BZIMAGE="${KERNEL_BZIMAGE:-${OUT_DIR}/linux/arch/x86/boot/bzImage}"
 KERNEL_IMAGE="${KERNEL_IMAGE:-${OUT_DIR}/linux/arch/arm64/boot/Image}"
-INITRAMFS_GZ="${INITRAMFS_GZ:-${OUT_DIR}/initramfs.cpio.gz}"
+INITRAMFS="${INITRAMFS:-${OUT_DIR}/initramfs.cpio}"
 SHARE_DIR="${SHARE_DIR:-${OUT_DIR}/share}"
 
 KERNEL9P_SERVER="${KERNEL9P_SERVER:-qemu}" # qemu | diod | u9fs | go9p-ufs
@@ -54,8 +54,8 @@ if [[ ! -f "${KERNEL_PATH}" ]]; then
   echo "Missing kernel image at ${KERNEL_PATH}" >&2
   exit 2
 fi
-if [[ ! -f "${INITRAMFS_GZ}" ]]; then
-  echo "Missing initramfs at ${INITRAMFS_GZ}" >&2
+if [[ ! -f "${INITRAMFS}" ]]; then
+  echo "Missing initramfs at ${INITRAMFS}" >&2
   exit 2
 fi
 
@@ -93,7 +93,7 @@ QEMU_ARGS=(
   -serial mon:stdio
   -nographic
   -kernel "${KERNEL_PATH}"
-  -initrd "${INITRAMFS_GZ}"
+  -initrd "${INITRAMFS}"
   -append "${KERNEL_APPEND}"
   "${MACHINE_ARGS_BASE[@]}"
 )

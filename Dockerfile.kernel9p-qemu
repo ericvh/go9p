@@ -111,7 +111,8 @@ RUN chmod +x /rootfs/init /rootfs/kernel9p-smoke \
   && mkdir -p /rootfs/bin /rootfs/sbin /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/mnt/9p \
   && ln -s /bin/busybox /rootfs/bin/sh \
   && (cd /rootfs && /bin/busybox --install -s bin) \
-  && (cd /rootfs && find . -print0 | cpio --null -ov --format=newc | gzip -9) > /out.cpio.gz
+  && (cd /rootfs && find . -print0 | cpio --null -ov --format=newc) > /out.cpio \
+  && gzip -9 < /out.cpio > /out.cpio.gz
 
 FROM debian:bookworm AS kernel9p-runtime
 ARG KERNEL_ARCH
@@ -133,6 +134,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && install -m0755 u9fs /usr/local/bin/u9fs \
   && rm -rf /tmp/u9fs
 
+COPY --from=initramfs /out.cpio /work/initramfs.cpio
 COPY --from=initramfs /out.cpio.gz /work/initramfs.cpio.gz
 COPY scripts/kernel9p-qemu-run.sh /work/run.sh
 COPY --from=gotools /out/go9p-ufs /work/go9p-ufs
@@ -144,7 +146,7 @@ RUN mkdir -p /work/share
 
 ENV OUT_DIR=/work/out
 ENV KERNEL_ARCH=${KERNEL_ARCH}
-ENV INITRAMFS_GZ=/work/initramfs.cpio.gz
+ENV INITRAMFS=/work/initramfs.cpio
 ENV SHARE_DIR=/work/share
 
 CMD ["/work/run.sh"]
