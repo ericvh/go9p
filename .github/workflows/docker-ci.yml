@@ -44,15 +44,29 @@ jobs:
         run: docker run --rm go9p:${{ matrix.target }}
 
   kernel9p-qemu:
-    name: kernel9p-qemu (${{ matrix.arch }})
+    name: kernel9p-qemu (${{ matrix.arch }}, ${{ matrix.server }})
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: amd64
             runs_on: ubuntu-latest
+            server: qemu
+          - arch: amd64
+            runs_on: ubuntu-latest
+            server: diod
+          - arch: amd64
+            runs_on: ubuntu-latest
+            server: u9fs
           - arch: arm64
             runs_on: ubuntu-24.04-arm
+            server: qemu
+          - arch: arm64
+            runs_on: ubuntu-24.04-arm
+            server: diod
+          - arch: arm64
+            runs_on: ubuntu-24.04-arm
+            server: u9fs
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 90
 
@@ -72,6 +86,10 @@ jobs:
           context: .
           file: ./Dockerfile.kernel9p-qemu
           target: kernel9p-test
+          # Pin the image OS/CPU to the runner matrix. Without this, Buildx can
+          # default to linux/amd64 even on arm64 jobs (or vice versa), so
+          # `load: true` ends up with the wrong architecture for that runner.
+          platforms: linux/${{ matrix.arch }}
           build-args: |
             KERNEL_ARCH=${{ matrix.arch }}
             LINUX_VERSION=${{ env.KERNEL9P_LINUX_VERSION }}
@@ -82,5 +100,5 @@ jobs:
           cache-to: type=gha,scope=kernel9p-${{ matrix.arch }}-${{ env.KERNEL9P_LINUX_VERSION }},mode=max
 
       - name: Run kernel9p-test (${{ matrix.arch }}, ${{ matrix.server }})
-        run: docker run --rm -e KERNEL9P_SERVER=${{ matrix.server }} go9p:kernel9p-${{ matrix.arch }}
+        run: docker run --rm --platform linux/${{ matrix.arch }} -e KERNEL9P_SERVER=${{ matrix.server }} go9p:kernel9p-${{ matrix.arch }}
 
