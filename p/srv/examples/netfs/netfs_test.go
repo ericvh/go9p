@@ -15,16 +15,16 @@ import (
 	"github.com/lionkov/go9p/p/srv"
 )
 
-func startDevnetServer(t *testing.T) (addr string, stop func()) {
+func startNetFSServer(t *testing.T) (addr string, stop func()) {
 	t.Helper()
 
-	dn, err := buildDevnet()
+	nfs, err := buildNetFS()
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	dn.srv = srv.NewFileSrv(dn.root)
-	dn.srv.Dotu = true
-	dn.srv.Start(dn.srv)
+	nfs.srv = srv.NewFileSrv(nfs.root)
+	nfs.srv.Dotu = true
+	nfs.srv.Start(nfs.srv)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -32,7 +32,7 @@ func startDevnetServer(t *testing.T) (addr string, stop func()) {
 	}
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- dn.srv.StartListener(ln) }()
+	go func() { errCh <- nfs.srv.StartListener(ln) }()
 
 	return ln.Addr().String(), func() {
 		_ = ln.Close()
@@ -72,8 +72,8 @@ func startTCPEcho(t *testing.T) (addr string, stop func()) {
 	}
 }
 
-func TestDevnet_TCPConnectAndEcho(t *testing.T) {
-	srvAddr, stop := startDevnetServer(t)
+func TestNetFS_TCPConnectAndEcho(t *testing.T) {
+	srvAddr, stop := startNetFSServer(t)
 	defer stop()
 
 	echoAddr, stopEcho := startTCPEcho(t)
@@ -94,7 +94,6 @@ func TestDevnet_TCPConnectAndEcho(t *testing.T) {
 		t.Fatalf("attach: %v", err)
 	}
 
-	// Allocate conversation id.
 	clone, err := c.FOpen("/net/tcp/clone", p.OREAD)
 	if err != nil {
 		t.Fatalf("open clone: %v", err)
@@ -117,7 +116,6 @@ func TestDevnet_TCPConnectAndEcho(t *testing.T) {
 	}
 	defer ctl.Close()
 
-	// connect host:port
 	if _, err := ctl.Write([]byte("connect " + echoAddr + "\n")); err != nil {
 		t.Fatalf("ctl connect: %v", err)
 	}
@@ -128,7 +126,7 @@ func TestDevnet_TCPConnectAndEcho(t *testing.T) {
 	}
 	defer data.Close()
 
-	want := []byte("hello-devnet\n")
+	want := []byte("hello-netfs\n")
 	if _, err := data.Write(want); err != nil {
 		t.Fatalf("write data: %v", err)
 	}
