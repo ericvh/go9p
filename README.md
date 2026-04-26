@@ -110,18 +110,6 @@ This boots an upstream Linux kernel in QEMU, mounts a virtio-9p export using the
 docker build -f Dockerfile.kernel9p-qemu --target kernel9p-test .
 ```
 
-Select which **9P server** the Linux kernel client talks to (set on the host; the guest reads `kernel9p.*` from the kernel command line):
-
-- **`KERNEL9P_SERVER=qemu`** (default): QEMU’s built-in virtio-9p export (`trans=virtio`, tag `hostshare`)
-- **`KERNEL9P_SERVER=diod`**: `diod` listening on TCP inside the container; guest uses user networking (`10.0.2.2:564`)
-- **`KERNEL9P_SERVER=u9fs`**: `u9fs` (built from source in the image) fronted by `socat` on TCP; same mount path as `diod`
-
-```bash
-docker run --rm -e KERNEL9P_SERVER=qemu go9p:kernel9p-amd64
-docker run --rm -e KERNEL9P_SERVER=diod go9p:kernel9p-amd64
-docker run --rm -e KERNEL9P_SERVER=u9fs go9p:kernel9p-amd64
-```
-
 Pin kernel version and/or architecture:
 
 ```bash
@@ -129,6 +117,16 @@ docker build -f Dockerfile.kernel9p-qemu --target kernel9p-test \
   --build-arg LINUX_VERSION=7.0 \
   --build-arg KERNEL_ARCH=amd64 \
   .
+```
+
+This fork also includes a `github.com/v9fs/test`-style harness that runs inside the prebuilt
+`ghcr.io/v9fs/docker:v2.0.0` image (no custom Dockerfile) and uses a u-root initrd + chroot flow:
+
+```bash
+docker run --rm --privileged --platform linux/arm64 \
+  -v "$PWD:/opt/v9fs/go9p" -w /opt/v9fs/go9p \
+  ghcr.io/v9fs/docker:v2.0.0 \
+  bash /opt/v9fs/go9p/scripts/v9fs/ci-e2e.sh
 ```
 
 ## Repository layout

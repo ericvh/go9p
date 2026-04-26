@@ -18,6 +18,8 @@ This is a working list for the modernization effort (module + current Go) and fo
 - Add GitHub Actions CI that runs Docker-based tests on push/PR.
 - Add QEMU harness to validate the **Linux kernel 9p client** against QEMU virtio-9p server (`Dockerfile.kernel9p-qemu`).
 - Run the kernel-client harness in CI on **arm64** GitHub-hosted runners (dropping amd64 for now).
+- Switch kernel-client CI to use the prebuilt `ghcr.io/v9fs/docker:v2.0.0` image (no custom v9fs Dockerfile), with a u-root initrd that mounts/chroots and runs `cmd/kernel9p-e2e`.
+- Add `AGENTS.md` synced from `github.com/v9fs/test` and follow it for future harness work.
 - Maintain `HERZOG.md` as an AI-generated stylistic mirror of `README.md` (CI-enforced).
 - Expand README with:
   - Concrete end-to-end example (UFS server + client) with flags and expected output

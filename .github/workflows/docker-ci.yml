@@ -4,6 +4,13 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      kernel_release:
+        description: "v9fs/test release tag providing the kernel Image (default: kernel-main)"
+        required: true
+        default: "kernel-main"
+        type: string
 
 env:
   # Pin the kernel version so BuildKit layer caching remains stable across commits.
@@ -44,8 +51,8 @@ jobs:
         run: docker run --rm go9p:${{ matrix.target }}
 
   kernel9p-qemu:
-    # arm64-only kernel-client testing for now.
-    name: kernel9p-qemu (arm64)
+    # arm64-only kernel-client testing using v9fs/docker methodology.
+    name: kernel9p-qemu (arm64, v9fs/docker)
     strategy:
       fail-fast: false
       matrix:
@@ -59,36 +66,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Check HERZOG.md mirrors README.md
         run: bash ./scripts/check-herzog-sync.sh
 
-      - name: Build kernel9p-test image (${{ matrix.arch }})
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile.kernel9p-qemu
-          # Use v9fs/test prebuilt kernel (Image asset).
-          target: kernel9p-test-v9fs
-          # Pin the image OS/CPU to the runner matrix. Without this, Buildx can
-          # default to linux/amd64 even on arm64 jobs (or vice versa), so
-          # `load: true` ends up with the wrong architecture for that runner.
-          platforms: linux/${{ matrix.arch }}
-          build-args: |
-            KERNEL_ARCH=${{ matrix.arch }}
-            LINUX_VERSION=${{ env.KERNEL9P_LINUX_VERSION }}
-            V9FS_TEST_KERNEL_TAG=kernel-main
-          load: true
-          tags: go9p:kernel9p-${{ matrix.arch }}
-          # Use a cache scope keyed by arch+kernel version to maximize reuse.
-          cache-from: type=gha,scope=kernel9p-${{ matrix.arch }}-${{ env.KERNEL9P_LINUX_VERSION }}
-          cache-to: type=gha,scope=kernel9p-${{ matrix.arch }}-${{ env.KERNEL9P_LINUX_VERSION }},mode=max
-
-      - name: Run kernel9p-test (${{ matrix.arch }}, qemu)
-        run: docker run --rm --platform linux/${{ matrix.arch }} -e KERNEL9P_SERVER=qemu go9p:kernel9p-${{ matrix.arch }}
-
-      - name: Run kernel9p-test (${{ matrix.arch }}, go9p-ufs)
-        run: docker run --rm --platform linux/${{ matrix.arch }} -e KERNEL9P_SERVER=go9p-ufs go9p:kernel9p-${{ matrix.arch }}
+      - name: Run v9fs/docker kernel-client e2e
+        run: |
+          docker run --rm --privileged --platform linux/arm64 \
+            -v "${{ github.workspace }}:/opt/v9fs/go9p" \
+            -w /opt/v9fs/go9p \
+            -e V9FS_TEST_KERNEL_TAG="${{ inputs.kernel_release || 'kernel-main' }}" \
+            ghcr.io/v9fs/docker:v2.0.0 \
+            bash /opt/v9fs/go9p/scripts/v9fs/ci-e2e.sh
 
