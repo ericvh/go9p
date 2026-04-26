@@ -18,8 +18,10 @@ curl -fsSL "https://github.com/v9fs/test/releases/download/${VMLINUX_TAG}/Image"
 
 echo "[host] building go9p binaries"
 cd /opt/v9fs/go9p
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o /opt/v9fs/kernel9p-e2e ./cmd/kernel9p-e2e
-go build -o /opt/v9fs/go9p-ufs ./p/srv/examples/ufs
+# In some CI/container contexts, Go's VCS stamping can fail (e.g. due to git metadata
+# ownership/safe.directory restrictions). Disable VCS stamping explicitly.
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -buildvcs=false -o /opt/v9fs/kernel9p-e2e ./cmd/kernel9p-e2e
+go build -buildvcs=false -o /opt/v9fs/go9p-ufs ./p/srv/examples/ufs
 
 echo "[host] building u-root initrd (uinitcmd: mount hostshare -> chroot -> guest-e2e.sh)"
 UROOTVERS="${UROOTVERS:-v0.16.0}"
