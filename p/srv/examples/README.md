@@ -174,3 +174,45 @@ Then list a directory over TLS:
 go run ./p/clnt/examples/tls -addr 127.0.0.1:5640 /
 ```
 
+### `devnet` (Plan 9 style `/net` over Linux TCP)
+
+`devnet` is a synthetic filesystem that models a small, useful subset of Plan 9’s `/net` device
+using go9p under Linux.
+
+It implements the **TCP conversation** pattern:
+
+```text
+/net
+└── tcp
+    ├── clone              (read: allocates a new conversation id)
+    └── <id>/              (per-conversation directory)
+        ├── ctl            (write: connect/close)
+        ├── data           (read/write: stream bytes over TCP)
+        ├── local          (read: local addr)
+        ├── remote         (read: remote addr)
+        └── status         (read: state summary)
+```
+
+Run:
+
+```bash
+go run ./p/srv/examples/devnet -addr 127.0.0.1:5640
+```
+
+Example usage (alloc + connect):
+
+```bash
+# Allocate a new TCP conversation id (prints e.g. "1")
+go run ./p/clnt/examples/read -addr 127.0.0.1:5640 /net/tcp/clone
+
+# Then write a connect command to the per-conversation ctl:
+#   connect host port
+#   connect host:port
+#   connect host!port
+```
+
+Notes:
+
+- This is intentionally minimal (no listening/announce yet, and not a full Plan 9 network stack).
+- The `data` file is stream-oriented (offset is ignored), similar to how `/net/tcp/<id>/data` behaves as a stream.
+
