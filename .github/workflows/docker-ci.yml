@@ -92,6 +92,9 @@ jobs:
           - arch: arm64
             runs_on: ubuntu-24.04-arm
             fs: timefs
+          - arch: arm64
+            runs_on: ubuntu-24.04-arm
+            fs: netfs
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 90
 
