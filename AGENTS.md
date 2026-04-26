@@ -7,6 +7,7 @@ Tweak freely.
 
 - Do active work on `rework` unless told otherwise.
 - Keep `README.md`, `CHANGES.md`, and `TODO.md` updated as changes land.
+- Keep `HERZOG.md` in sync with `README.md` headings (AI-generated stylistic mirror).
 - Do not commit generated outputs (`logs/`, `kernel/`, `tmp/`, `initrd.cpio`, pid files).
 
 ## Test philosophy
