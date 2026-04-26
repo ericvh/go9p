@@ -302,7 +302,7 @@ docker run --rm --privileged --platform linux/arm64 \
   bash /opt/v9fs/go9p/scripts/v9fs/ci-e2e-fs.sh ramfs
 ```
 
-Supported `ci-e2e-fs.sh` filesystem arguments: `ufs`, `ramfs`, `clonefs`, `timefs`.
+Supported `ci-e2e-fs.sh` filesystem arguments: `ufs`, `ramfs`, `clonefs`, `timefs`, `netfs`.
 
 Note: `tlsramfs` is **TLS-only** and is exercised via userspace (Go) tests rather than a Linux kernel mount.
 

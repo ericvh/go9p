@@ -36,7 +36,7 @@ case "${FS}" in
     mount_and_run "9p2000.u" "${MNT_BASE}-9p2000u" "go9p-ufs"
     mount_and_run "9p2000" "${MNT_BASE}-9p2000" "kernel-only"
     ;;
-  ramfs|clonefs|timefs)
+  ramfs|clonefs|timefs|netfs)
     # Kernel mount smoke only; behavior is tailored inside kernel9p-e2e by KERNEL9P_FS.
     mount_and_run "9p2000.u" "${MNT_BASE}-9p2000u" "kernel-only"
     mount_and_run "9p2000" "${MNT_BASE}-9p2000" "kernel-only"

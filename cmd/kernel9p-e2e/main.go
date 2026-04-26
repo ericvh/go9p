@@ -251,6 +251,29 @@ func kernelCloneFSSmoke(root string) {
 	}
 }
 
+func kernelNetFSSmoke(root string) {
+	netdir := filepath.Join(root, "net")
+	st, err := os.Stat(netdir)
+	must(err, "stat /net")
+	if !st.IsDir() {
+		must(fmt.Errorf("/net not a directory"), "net is dir")
+	}
+
+	// Read a couple of representative files (mostly read-only surfaces).
+	_ = readAll(filepath.Join(netdir, "ipselftab"))
+	mac := strings.TrimSpace(string(readAll(filepath.Join(netdir, "ether0", "addr"))))
+	if len(mac) != 12 {
+		must(fmt.Errorf("unexpected ether0 addr len=%d", len(mac)), "ether0 addr length")
+	}
+
+	// Exercise the tcp clone pattern: reading clone should allocate a conversation.
+	id := strings.TrimSpace(string(readAll(filepath.Join(netdir, "tcp", "clone"))))
+	if id == "" {
+		must(fmt.Errorf("empty tcp clone id"), "tcp clone id")
+	}
+	_ = readAll(filepath.Join(netdir, "tcp", id, "status"))
+}
+
 func dial9P(addr string, timeout time.Duration) (net.Conn, error) {
 	deadline := time.Now().Add(timeout)
 	for {
@@ -343,6 +366,9 @@ func main() {
 	case "clonefs":
 		kernelCloneFSSmoke(mount)
 		fmt.Println("PASS: kernel clonefs mount smoke")
+	case "netfs":
+		kernelNetFSSmoke(mount)
+		fmt.Println("PASS: kernel netfs mount smoke")
 	default:
 		must(fmt.Errorf("unknown KERNEL9P_FS=%q", fs), "select fs mode")
 	}
