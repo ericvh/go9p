@@ -79,6 +79,13 @@ p
 README.md
 ```
 
+### Example servers and clients
+
+More detailed documentation for the example programs lives alongside the code:
+
+- Server examples: `p/srv/examples/README.md`
+- Client examples: `p/clnt/examples/README.md`
+
 ## Testing
 
 ```bash
