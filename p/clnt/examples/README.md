@@ -51,3 +51,19 @@ go run ./p/clnt/examples/tls -addr 127.0.0.1:5640 /
 
 This uses `InsecureSkipVerify` because the server example uses an embedded self-signed test certificate.
 
+### Under the hood (what these examples exercise)
+
+The example programs generally follow the same pattern:
+
+- **Connect** to the server (`net.Dial` or `tls.Dial`)
+- **Negotiate** protocol version / `msize` and (optionally) `Dotu` via the client constructor
+- **Attach** to the remote root with the current user (see `p.OsUsers`)
+- **Walk/Open/Read/Write** using either:
+  - the lower-level `Clnt` methods (`Walk`, `Open`, `Read`, `Write`, etc.), or
+  - the higher-level `clnt.File` helpers (`FOpen`, `FCreate`, `Readdir`, `Read`, `Write`, etc.)
+
+If you’re debugging behavior:
+
+- Increasing `-d` (debuglevel) typically enables client-side tracing via `clnt.DefaultDebuglevel`.
+- `-m` (msize) affects maximum message payloads (and can change chunking behavior for large reads/writes).
+
