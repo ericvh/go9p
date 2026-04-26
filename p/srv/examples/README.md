@@ -174,12 +174,12 @@ Then list a directory over TLS:
 go run ./p/clnt/examples/tls -addr 127.0.0.1:5640 /
 ```
 
-### `devnet` (Plan 9 style `/net` over Linux TCP)
+### `netfs` (Plan 9 style `/net` on Linux)
 
-`devnet` is a synthetic filesystem that models a small, useful subset of Plan 9’s `/net` device
-using go9p under Linux.
+`netfs` is a synthetic filesystem that models a small, useful subset of Plan 9’s `/net` device
+(documented in `ip(3)`, `ether(3)`, `bridge(3)`) using go9p under Linux.
 
-It implements the **TCP conversation** pattern:
+It currently implements a working subset of the **TCP conversation** pattern:
 
 ```text
 /net
@@ -196,7 +196,7 @@ It implements the **TCP conversation** pattern:
 Run:
 
 ```bash
-go run ./p/srv/examples/devnet -addr 127.0.0.1:5640
+go run ./p/srv/examples/netfs -addr 127.0.0.1:5640
 ```
 
 Example usage (alloc + connect):
@@ -213,6 +213,21 @@ go run ./p/clnt/examples/read -addr 127.0.0.1:5640 /net/tcp/clone
 
 Notes:
 
-- This is intentionally minimal (no listening/announce yet, and not a full Plan 9 network stack).
+- This is intentionally minimal (not a full Plan 9 network stack).
 - The `data` file is stream-oriented (offset is ignored), similar to how `/net/tcp/<id>/data` behaves as a stream.
+ - The rest of the `ip(3)` / `ether(3)` / `bridge(3)` surface exists primarily as a starting point and is not yet feature-complete.
+
+Additional surface currently present (minimal/stubbed):
+
+- `ip(3)`:
+  - `/net/ipifc/*/status` (read-only view of `net.Interfaces()` addresses)
+  - `/net/ndb` (read/write up to 1024 bytes)
+  - `/net/log` (accepts `set/clear/only` controls; stores a small log)
+  - `/net/arp`, `/net/iproute` (present; no-op on write, empty on read)
+  - `/net/ipselftab` (read-only local address listing)
+  - protocol dirs: `/net/udp`, `/net/icmp`, `/net/icmpv6`, `/net/gre`, `/net/esp`, `/net/ipmux`, `/net/rudp` (placeholders)
+- `ether(3)`:
+  - `/net/ether0/addr` and clone + per-connection dirs (packet I/O not implemented yet)
+- `bridge(3)`:
+  - `/net/bridge0/{ctl,cache,log,stats}` (control is logged; no packet forwarding yet)
 
