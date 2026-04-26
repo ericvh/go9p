@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"io"
 	"net"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,24 @@ import (
 	"github.com/lionkov/go9p/p/clnt"
 	"github.com/lionkov/go9p/p/srv"
 )
+
+func mountNetFSClient(t *testing.T, addr string) (*clnt.Clnt, func()) {
+	t.Helper()
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial 9p: %v", err)
+	}
+	c := clnt.NewClnt(conn, 8192, true)
+	user := p.OsUsers.Uid2User(os.Geteuid())
+	if _, err := c.Attach(nil, user, "/"); err != nil {
+		_ = conn.Close()
+		t.Fatalf("attach: %v", err)
+	}
+	return c, func() {
+		c.Unmount()
+		_ = conn.Close()
+	}
+}
 
 func startNetFSServer(t *testing.T) (addr string, stop func()) {
 	t.Helper()
@@ -79,20 +99,8 @@ func TestNetFS_TCPConnectAndEcho(t *testing.T) {
 	echoAddr, stopEcho := startTCPEcho(t)
 	defer stopEcho()
 
-	conn, err := net.Dial("tcp", srvAddr)
-	if err != nil {
-		t.Fatalf("dial 9p: %v", err)
-	}
-	defer conn.Close()
-
-	c := clnt.NewClnt(conn, 8192, true)
-	defer c.Unmount()
-
-	user := p.OsUsers.Uid2User(os.Geteuid())
-	_, err = c.Attach(nil, user, "/")
-	if err != nil {
-		t.Fatalf("attach: %v", err)
-	}
+	c, cleanup := mountNetFSClient(t, srvAddr)
+	defer cleanup()
 
 	clone, err := c.FOpen("/net/tcp/clone", p.OREAD)
 	if err != nil {
@@ -137,6 +145,199 @@ func TestNetFS_TCPConnectAndEcho(t *testing.T) {
 	}
 	if string(got) != string(want) {
 		t.Fatalf("got %q want %q", string(got), string(want))
+	}
+}
+
+func TestNetFS_NDB_Limit(t *testing.T) {
+	srvAddr, stop := startNetFSServer(t)
+	defer stop()
+
+	c, cleanup := mountNetFSClient(t, srvAddr)
+	defer cleanup()
+
+	f, err := c.FOpen("/net/ndb", p.OWRITE)
+	if err != nil {
+		t.Fatalf("open /net/ndb: %v", err)
+	}
+	defer f.Close()
+
+	tooBig := bytes.Repeat([]byte("x"), 1025)
+	if _, err := f.Write(tooBig); err == nil {
+		t.Fatalf("expected write error for >1024 bytes")
+	}
+}
+
+func TestNetFS_IPSelftab_Readable(t *testing.T) {
+	srvAddr, stop := startNetFSServer(t)
+	defer stop()
+
+	c, cleanup := mountNetFSClient(t, srvAddr)
+	defer cleanup()
+
+	f, err := c.FOpen("/net/ipselftab", p.OREAD)
+	if err != nil {
+		t.Fatalf("open ipselftab: %v", err)
+	}
+	defer f.Close()
+
+	if _, err = io.ReadAll(f); err != nil {
+		t.Fatalf("read ipselftab: %v", err)
+	}
+}
+
+func TestNetFS_IPIFC_StatusPresent(t *testing.T) {
+	srvAddr, stop := startNetFSServer(t)
+	defer stop()
+
+	c, cleanup := mountNetFSClient(t, srvAddr)
+	defer cleanup()
+
+	d, err := c.FOpen("/net/ipifc", p.OREAD)
+	if err != nil {
+		t.Fatalf("open ipifc: %v", err)
+	}
+	defer d.Close()
+
+	ents, err := d.Readdir(0)
+	if err != nil && !errors.Is(err, io.EOF) {
+		t.Fatalf("readdir ipifc: %v", err)
+	}
+	foundStats := false
+	foundNumbered := ""
+	for _, e := range ents {
+		if e.Name == "stats" {
+			foundStats = true
+		}
+		if len(foundNumbered) == 0 && regexp.MustCompile(`^\d+$`).MatchString(e.Name) {
+			foundNumbered = e.Name
+		}
+	}
+	if !foundStats {
+		t.Fatalf("expected /net/ipifc/stats to exist")
+	}
+	if foundNumbered == "" {
+		t.Fatalf("expected at least one numbered /net/ipifc/<n> directory")
+	}
+
+	st, err := c.FOpen("/net/ipifc/"+foundNumbered+"/status", p.OREAD)
+	if err != nil {
+		t.Fatalf("open ipifc status: %v", err)
+	}
+	defer st.Close()
+	_, _ = io.ReadAll(st)
+}
+
+func TestNetFS_Ether0_AddrAndType(t *testing.T) {
+	srvAddr, stop := startNetFSServer(t)
+	defer stop()
+
+	c, cleanup := mountNetFSClient(t, srvAddr)
+	defer cleanup()
+
+	af, err := c.FOpen("/net/ether0/addr", p.OREAD)
+	if err != nil {
+		t.Fatalf("open ether0 addr: %v", err)
+	}
+	b, _ := io.ReadAll(af)
+	_ = af.Close()
+	s := strings.TrimSpace(string(b))
+	if len(s) != 12 {
+		t.Fatalf("expected 12 hex chars mac, got %q", s)
+	}
+	if !regexp.MustCompile(`^[0-9a-fA-F]{12}$`).MatchString(s) {
+		t.Fatalf("expected hex mac, got %q", s)
+	}
+
+	clone, err := c.FOpen("/net/ether0/clone", p.OREAD)
+	if err != nil {
+		t.Fatalf("open ether clone: %v", err)
+	}
+	r := bufio.NewReader(clone)
+	idLine, err := r.ReadString('\n')
+	_ = clone.Close()
+	if err != nil {
+		t.Fatalf("read ether clone: %v", err)
+	}
+	id := strings.TrimSpace(idLine)
+	if id == "" {
+		t.Fatalf("empty ether id")
+	}
+
+	ctl, err := c.FOpen("/net/ether0/"+id+"/ctl", p.OWRITE)
+	if err != nil {
+		t.Fatalf("open ether ctl: %v", err)
+	}
+	if _, err := ctl.Write([]byte("connect 2048\n")); err != nil {
+		_ = ctl.Close()
+		t.Fatalf("write connect: %v", err)
+	}
+	_ = ctl.Close()
+
+	tf, err := c.FOpen("/net/ether0/"+id+"/type", p.OREAD)
+	if err != nil {
+		t.Fatalf("open ether type: %v", err)
+	}
+	tb, _ := io.ReadAll(tf)
+	_ = tf.Close()
+	if strings.TrimSpace(string(tb)) != "2048" {
+		t.Fatalf("expected type=2048, got %q", strings.TrimSpace(string(tb)))
+	}
+}
+
+func TestNetFS_Bridge0_CtlLogs(t *testing.T) {
+	srvAddr, stop := startNetFSServer(t)
+	defer stop()
+
+	c, cleanup := mountNetFSClient(t, srvAddr)
+	defer cleanup()
+
+	ctl, err := c.FOpen("/net/bridge0/ctl", p.OWRITE)
+	if err != nil {
+		t.Fatalf("open bridge ctl: %v", err)
+	}
+	line := "bind ether test0 0 /net/ether0\n"
+	if _, err := ctl.Write([]byte(line)); err != nil {
+		_ = ctl.Close()
+		t.Fatalf("write bridge ctl: %v", err)
+	}
+	_ = ctl.Close()
+
+	logf, err := c.FOpen("/net/bridge0/log", p.OREAD)
+	if err != nil {
+		t.Fatalf("open bridge log: %v", err)
+	}
+	b, _ := io.ReadAll(logf)
+	_ = logf.Close()
+	if !strings.Contains(string(b), strings.TrimSpace(line)) {
+		t.Fatalf("expected bridge log to contain ctl line; got %q", string(b))
+	}
+}
+
+func TestNetFS_ProtocolDirs_Present(t *testing.T) {
+	srvAddr, stop := startNetFSServer(t)
+	defer stop()
+
+	c, cleanup := mountNetFSClient(t, srvAddr)
+	defer cleanup()
+
+	for _, proto := range []string{"udp", "icmp", "icmpv6", "gre", "esp", "ipmux", "rudp"} {
+		stats, err := c.FOpen("/net/"+proto+"/stats", p.OREAD)
+		if err != nil {
+			t.Fatalf("open %s stats: %v", proto, err)
+		}
+		_, _ = io.ReadAll(stats)
+		_ = stats.Close()
+
+		clone, err := c.FOpen("/net/"+proto+"/clone", p.OREAD)
+		if err != nil {
+			t.Fatalf("open %s clone: %v", proto, err)
+		}
+		buf := make([]byte, 1)
+		_, rerr := clone.Read(buf)
+		_ = clone.Close()
+		if rerr == nil {
+			t.Fatalf("expected %s clone read to error (stub)", proto)
+		}
 	}
 }
 
