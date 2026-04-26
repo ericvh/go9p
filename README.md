@@ -86,6 +86,20 @@ More detailed documentation for the example programs lives alongside the code:
 - Server examples: `p/srv/examples/README.md`
 - Client examples: `p/clnt/examples/README.md`
 
+### Plan 9-style `/net` example (`netfs`)
+
+This repo includes `netfs`, a synthetic filesystem that models a small (and still evolving) subset of
+Plan 9’s `/net` interfaces (`ip(3)`, `ether(3)`, `bridge(3)`) using go9p under Linux.
+
+It provides a working `/net/tcp` conversation interface (`clone` + per-connection `ctl`/`data`), plus
+additional stubbed entry points you can expand.
+
+Run it:
+
+```bash
+go run ./p/srv/examples/netfs -addr 127.0.0.1:5640
+```
+
 ## Building a synthetic filesystem (server-side guide)
 
 This repo’s `p/srv` package lets you serve a **synthetic** filesystem by building a tree of `srv.File`
