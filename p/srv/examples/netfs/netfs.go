@@ -58,24 +58,24 @@ type NetFS struct {
 	net  *srv.File
 
 	// Protocol dirs (ip(3) style).
-	tcp *srv.File
-	udp *srv.File
-	icmp *srv.File
+	tcp    *srv.File
+	udp    *srv.File
+	icmp   *srv.File
 	icmpv6 *srv.File
-	gre *srv.File
-	esp *srv.File
-	ipmux *srv.File
-	rudp *srv.File
+	gre    *srv.File
+	esp    *srv.File
+	ipmux  *srv.File
+	rudp   *srv.File
 
 	// ipifc (ip(3) interface configuration).
-	ipifc     *srv.File
-	ipifcNDB  *NDBFile
+	ipifc      *srv.File
+	ipifcNDB   *NDBFile
 	ipifcStats *IPIFCStatsFile
 
-	arp        *ARPFile
-	iproute    *IPRouteFile
-	ipselftab  *IPSelftabFile
-	netlog     *NetLogFile
+	arp       *ARPFile
+	iproute   *IPRouteFile
+	ipselftab *IPSelftabFile
+	netlog    *NetLogFile
 
 	// ether(3) style (single device: ether0).
 	ether0 *srv.File
@@ -254,6 +254,11 @@ type TCPStatus struct {
 	conv *TCPConv
 }
 
+type TCPError struct {
+	srv.File
+	conv *TCPConv
+}
+
 type TCPStringFile struct {
 	srv.File
 	conv *TCPConv
@@ -359,6 +364,12 @@ func (f *TCPClone) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) {
 		return 0, err
 	}
 
+	ef := new(TCPError)
+	ef.conv = conv
+	if err := ef.Add(dir, "error", user, nil, 0o444, ef); err != nil {
+		return 0, err
+	}
+
 	out := []byte(strconv.Itoa(id) + "\n")
 	if len(out) > len(buf) {
 		out = out[:len(buf)]
@@ -378,18 +389,44 @@ func (f *TCPCTL) Write(fid *srv.FFid, data []byte, offset uint64) (int, error) {
 		arg := strings.TrimSpace(strings.TrimPrefix(cmd, "connect"))
 		hp, err := parseConnectArg(arg)
 		if err != nil {
+			f.conv.mu.Lock()
+			f.conv.lastErr = err.Error()
+			f.conv.mu.Unlock()
 			return 0, err
 		}
 		if err := f.conv.connect(hp); err != nil {
+			// connect() already sets lastErr on failure, but keep it explicit for ctl users.
+			f.conv.mu.Lock()
+			f.conv.lastErr = err.Error()
+			f.conv.mu.Unlock()
 			return 0, err
 		}
+		f.conv.mu.Lock()
+		f.conv.lastErr = ""
+		f.conv.mu.Unlock()
 		return len(data), nil
 	case "close":
 		_ = f.conv.close()
+		f.conv.mu.Lock()
+		f.conv.lastErr = ""
+		f.conv.mu.Unlock()
 		return len(data), nil
 	default:
-		return 0, fmt.Errorf("unknown ctl command %q", fields[0])
+		err := fmt.Errorf("unknown ctl command %q", fields[0])
+		f.conv.mu.Lock()
+		f.conv.lastErr = err.Error()
+		f.conv.mu.Unlock()
+		return 0, err
 	}
+}
+
+func (f *TCPError) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) {
+	_, _, _, lastErr := f.conv.snapshot()
+	if strings.TrimSpace(lastErr) == "" {
+		lastErr = "ok"
+	}
+	lastErr += "\n"
+	return readWithOffset([]byte(lastErr), buf, offset)
 }
 
 func (f *TCPData) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) {
@@ -553,13 +590,19 @@ type EtherClone struct {
 }
 
 type EtherConn struct {
-	mu         sync.Mutex
-	etype      int
-	promisc    bool
+	mu          sync.Mutex
+	etype       int
+	promisc     bool
 	headersonly bool
+	lastErr     string
 }
 
 type EtherCtl struct {
+	srv.File
+	conn *EtherConn
+}
+
+type EtherErrorFile struct {
 	srv.File
 	conn *EtherConn
 }
@@ -607,6 +650,12 @@ func (f *EtherClone) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error)
 		return 0, err
 	}
 
+	ef := new(EtherErrorFile)
+	ef.conn = conn
+	if err := ef.Add(d, "error", user, nil, 0o444, ef); err != nil {
+		return 0, err
+	}
+
 	out := []byte(strconv.Itoa(id) + "\n")
 	if len(out) > len(buf) {
 		out = out[:len(buf)]
@@ -626,24 +675,41 @@ func (f *EtherCtl) Write(fid *srv.FFid, data []byte, offset uint64) (int, error)
 	switch fields[0] {
 	case "connect":
 		if len(fields) != 2 {
-			return 0, fmt.Errorf("connect: expected type")
+			f.conn.lastErr = "connect: expected type"
+			return 0, fmt.Errorf("%s", f.conn.lastErr)
 		}
 		n, err := strconv.Atoi(fields[1])
 		if err != nil {
+			f.conn.lastErr = err.Error()
 			return 0, err
 		}
 		f.conn.etype = n
+		f.conn.lastErr = ""
 		return len(data), nil
 	case "promiscuous":
 		f.conn.promisc = true
+		f.conn.lastErr = ""
 		return len(data), nil
 	case "headersonly":
 		f.conn.headersonly = true
+		f.conn.lastErr = ""
 		return len(data), nil
 	default:
 		// Accept and ignore ip(3) interface control messages to match ether(3)'s note.
+		f.conn.lastErr = ""
 		return len(data), nil
 	}
+}
+
+func (f *EtherErrorFile) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) {
+	f.conn.mu.Lock()
+	lastErr := f.conn.lastErr
+	f.conn.mu.Unlock()
+	if strings.TrimSpace(lastErr) == "" {
+		lastErr = "ok"
+	}
+	lastErr += "\n"
+	return readWithOffset([]byte(lastErr), buf, offset)
 }
 
 func (f *EtherTypeFile) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) {
@@ -906,4 +972,3 @@ func main() {
 		log.Fatalf("listen %s: %v", *addr, err)
 	}
 }
-

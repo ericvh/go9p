@@ -148,6 +148,48 @@ func TestNetFS_TCPConnectAndEcho(t *testing.T) {
 	}
 }
 
+func TestNetFS_TCPCtlErrorFile(t *testing.T) {
+	srvAddr, stop := startNetFSServer(t)
+	defer stop()
+
+	c, cleanup := mountNetFSClient(t, srvAddr)
+	defer cleanup()
+
+	clone, err := c.FOpen("/net/tcp/clone", p.OREAD)
+	if err != nil {
+		t.Fatalf("open clone: %v", err)
+	}
+	line, err := bufio.NewReader(clone).ReadString('\n')
+	_ = clone.Close()
+	if err != nil {
+		t.Fatalf("read clone: %v", err)
+	}
+	id := strings.TrimSpace(line)
+
+	ctl, err := c.FOpen("/net/tcp/"+id+"/ctl", p.OWRITE)
+	if err != nil {
+		t.Fatalf("open ctl: %v", err)
+	}
+	_, err = ctl.Write([]byte("connect not-a-host\n"))
+	_ = ctl.Close()
+	if err == nil {
+		t.Fatalf("expected connect to fail")
+	}
+
+	ef, err := c.FOpen("/net/tcp/"+id+"/error", p.OREAD)
+	if err != nil {
+		t.Fatalf("open error: %v", err)
+	}
+	b, err := io.ReadAll(ef)
+	_ = ef.Close()
+	if err != nil {
+		t.Fatalf("read error: %v", err)
+	}
+	if strings.TrimSpace(string(b)) == "ok" {
+		t.Fatalf("expected error detail, got %q", string(b))
+	}
+}
+
 func TestNetFS_NDB_Limit(t *testing.T) {
 	srvAddr, stop := startNetFSServer(t)
 	defer stop()
@@ -273,6 +315,29 @@ func TestNetFS_Ether0_AddrAndType(t *testing.T) {
 	}
 	_ = ctl.Close()
 
+	// Malformed connect should fail and record details in /error.
+	ctl, err = c.FOpen("/net/ether0/"+id+"/ctl", p.OWRITE)
+	if err != nil {
+		t.Fatalf("open ether ctl (2): %v", err)
+	}
+	_, err = ctl.Write([]byte("connect\n"))
+	_ = ctl.Close()
+	if err == nil {
+		t.Fatalf("expected malformed connect to fail")
+	}
+	ef, err := c.FOpen("/net/ether0/"+id+"/error", p.OREAD)
+	if err != nil {
+		t.Fatalf("open ether error: %v", err)
+	}
+	eb, err := io.ReadAll(ef)
+	_ = ef.Close()
+	if err != nil {
+		t.Fatalf("read ether error: %v", err)
+	}
+	if !strings.Contains(string(eb), "expected type") {
+		t.Fatalf("error=%q", string(eb))
+	}
+
 	tf, err := c.FOpen("/net/ether0/"+id+"/type", p.OREAD)
 	if err != nil {
 		t.Fatalf("open ether type: %v", err)
@@ -340,4 +405,3 @@ func TestNetFS_ProtocolDirs_Present(t *testing.T) {
 		}
 	}
 }
-
