@@ -240,8 +240,9 @@ It’s designed around **devices** and their **functions** (Device Connect `@rpc
 filesystem operations as protocol steps:
 
 - **read** to discover devices and inspect metadata/status
-- **write** to invoke a function
-- **read** to retrieve the last result (or last error)
+- **read** `clone` to allocate a per-call directory
+- **write** `ctl` to invoke a function using request bytes written to `data`
+- **read** `data` (and `error`) to retrieve outputs
 
 Filesystem shape:
 

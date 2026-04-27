@@ -14,9 +14,7 @@ The goal is not to faithfully reimplement Device Connect’s transport (Zenoh/NA
 ## Goals
 
 - Provide a **hierarchical namespace** that makes device→function relationships obvious.
-- Make invocation a **filesystem protocol step**:
-  - `write` to a file triggers a function call
-  - `read` returns the last result (or last error)
+- Make function calls a **filesystem protocol step** using Plan 9 conventions (`clone`, `ctl`, `data`).
 - Keep the interface **toolable** (`ls`, `cat`, `echo`) and easy to test using the `go9p` userspace client.
 
 ## Non-goals (for this example)
@@ -154,17 +152,26 @@ Internally, the filesystem talks to a backend interface:
 - list devices
 - get per-device metadata/status and function inventory
 - read per-device values (snapshot reads)
-- invoke a function
+- invoke a function (backend call that `ctl` triggers)
  - subscribe to per-device events
  - optionally subscribe to per-value events
 
 In this repo, tests use a **fake backend** and interact with the example exclusively through the **Go 9P client** (`p/clnt`).
 
-## Why no `clone` yet?
+## Why `clone` for functions?
 
-Many synthetic filesystems use `clone` + per-instance directories for sessions, leases, or subscriptions.
-This example keeps invocation stateless (idempotent “request → last result”) because it is meant as a minimal baseline.
+We use `clone` for function calls so each call has a **stable per-invocation directory** that can hold:
 
+- the request bytes (written to `data`)
+- the response bytes (read from `data`)
+- the last error string (read from `error`)
+
+This mirrors classic Plan 9 patterns (`/net/tcp/clone` → `<id>/ctl` + `<id>/data`) and avoids overloading a single file
+with “write triggers call” and “read returns result” semantics.
+
+## Possible next expansion: sessions
+
+Many synthetic filesystems also use `clone` at a higher level to allocate sessions, leases, or subscriptions.
 An obvious next expansion is:
 
 ```text
