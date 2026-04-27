@@ -272,6 +272,7 @@ Filesystem shape:
                         ├── ctl
                         ├── data
                         └── error
+                        └── stream
 ```
 
 Design notes live in `p/srv/examples/deviceconnect/DESIGN.md`.

@@ -52,6 +52,7 @@ The filesystem root contains a `devices/` tree.
               ctl
               data
               error
+              stream
 ```
 
 ### `devices/discover`
@@ -87,7 +88,7 @@ This keeps *pull* (snapshot value) distinct from *push* (events) and avoids inve
 
 ### `devices/by-id/<device-id>/values/<name>/events/{replay,stream}`
 
-- identical semantics to device-level `events/*`, but scoped to a particular value stream.
+- identical semantics to device-level `events/`*, but scoped to a particular value stream.
 
 ### `devices/by-id/<device-id>/functions/<fn>/about`
 
@@ -110,6 +111,7 @@ This example keeps schemas textual; production systems may want JSON Schema or p
 Supported commands:
 
 - `call`: invoke the function using the current request bytes written to `data`
+- `stream`: invoke the function in streaming mode (if supported)
 - `reset`: clear request/response/error buffers
 
 On failure, `ctl` returns a 9P error (Rerror). This is the “standard” mechanism.
@@ -126,6 +128,18 @@ On failure, `ctl` returns a 9P error (Rerror). This is the “standard” mechan
 
 This exists because Linux kernel mounts often collapse 9P errors into generic errno values on write;
 reading `error` preserves the detailed message even when the caller can’t see the original 9P Rerror.
+
+### `devices/by-id/<device-id>/functions/<fn>/<id>/stream`
+
+- **read-only**: a bounded buffer of streamed output chunks produced by `ctl stream`.
+
+Notes:
+
+- Streaming support is **function-dependent**; if the backend doesn’t support streaming for a function,
+  `ctl stream` returns a 9P error and records details in `error`.
+- This example keeps `stream` non-blocking and bounded (similar to the per-device event logs) to avoid
+  hanging basic tooling and unit tests. Production systems may prefer a blocking stream or an external
+  transport handle.
 
 ## Events
 
@@ -153,8 +167,8 @@ Internally, the filesystem talks to a backend interface:
 - get per-device metadata/status and function inventory
 - read per-device values (snapshot reads)
 - invoke a function (backend call that `ctl` triggers)
- - subscribe to per-device events
- - optionally subscribe to per-value events
+- subscribe to per-device events
+- optionally subscribe to per-value events
 
 In this repo, tests use a **fake backend** and interact with the example exclusively through the **Go 9P client** (`p/clnt`).
 
@@ -184,4 +198,3 @@ An obvious next expansion is:
 ```
 
 where `clone` allocates a session and `events/stream` aggregates device events relevant to that session.
-

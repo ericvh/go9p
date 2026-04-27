@@ -58,6 +58,7 @@ type Backend interface {
 	ListDevices(ctx context.Context) ([]Device, error)
 	ReadValue(ctx context.Context, deviceID string, name string) ([]byte, error)
 	Invoke(ctx context.Context, deviceID string, fn string, payload []byte) ([]byte, error)
+	InvokeStream(ctx context.Context, deviceID string, fn string, payload []byte) (<-chan []byte, error)
 
 	// SubscribeDeviceEvents returns a stream of events for a device until ctx is
 	// cancelled. Implementations should return (nil, nil) when events are not supported.
@@ -176,6 +177,8 @@ type callInstance struct {
 	req  []byte
 	resp []byte
 	err  string
+
+	stream *eventLog
 }
 
 type callDataFile struct {
@@ -262,6 +265,50 @@ func (f *callCtlFile) Write(fid *srv.FFid, data []byte, offset uint64) (int, err
 		f.inst.resp = resp
 		f.inst.mu.Unlock()
 		return len(data), nil
+	case "stream":
+		f.inst.mu.Lock()
+		req := append([]byte(nil), f.inst.req...)
+		f.inst.err = ""
+		f.inst.resp = nil
+		if f.inst.stream == nil {
+			f.inst.stream = newEventLog(256 * 1024)
+		}
+		// Reset stream buffer for this run.
+		f.inst.stream.mu.Lock()
+		f.inst.stream.buf = nil
+		f.inst.stream.mu.Unlock()
+		slog := f.inst.stream
+		f.inst.mu.Unlock()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		ch, err := f.backend.InvokeStream(ctx, f.deviceID, f.fn, req)
+		if err != nil {
+			f.inst.mu.Lock()
+			f.inst.err = err.Error()
+			f.inst.mu.Unlock()
+			return 0, &p.Error{Err: err.Error(), Errornum: 0}
+		}
+		if ch == nil {
+			err := fmt.Errorf("stream not supported")
+			f.inst.mu.Lock()
+			f.inst.err = err.Error()
+			f.inst.mu.Unlock()
+			return 0, &p.Error{Err: err.Error(), Errornum: 0}
+		}
+		for chunk := range ch {
+			if len(chunk) == 0 {
+				continue
+			}
+			slog.appendLine(chunk)
+		}
+		// For convenience, also publish the concatenated stream as resp.
+		f.inst.mu.Lock()
+		slog.mu.Lock()
+		f.inst.resp = append([]byte(nil), slog.buf...)
+		slog.mu.Unlock()
+		f.inst.mu.Unlock()
+		return len(data), nil
 	case "reset":
 		f.inst.mu.Lock()
 		f.inst.req = nil
@@ -317,6 +364,13 @@ func (f *funcCloneFile) Read(fid *srv.FFid, buf []byte, offset uint64) (int, err
 	}
 	errf := &callErrFile{inst: inst}
 	if err := errf.Add(instDir, "error", f.user, nil, 0o444, errf); err != nil {
+		instDir.Remove()
+		return 0, err
+	}
+
+	streamf := &eventLogFile{log: newEventLog(256 * 1024)}
+	inst.stream = streamf.log
+	if err := streamf.Add(instDir, "stream", f.user, nil, 0o444, streamf); err != nil {
 		instDir.Remove()
 		return 0, err
 	}
@@ -673,6 +727,11 @@ func (b *demoBackend) Invoke(ctx context.Context, deviceID string, fn string, pa
 		return nil, fmt.Errorf("unknown function %q for device %q", fn, deviceID)
 	}
 	return nil, fmt.Errorf("unknown device %q", deviceID)
+}
+
+func (b *demoBackend) InvokeStream(ctx context.Context, deviceID string, fn string, payload []byte) (<-chan []byte, error) {
+	// Demo backend doesn't stream.
+	return nil, nil
 }
 
 func (b *demoBackend) SubscribeDeviceEvents(ctx context.Context, deviceID string) (<-chan Event, error) {

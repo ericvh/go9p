@@ -18,6 +18,7 @@ import (
 type fakeBackend struct {
 	devices []Device
 	invoke  func(deviceID, fn string, payload []byte) ([]byte, error)
+	stream  func(deviceID, fn string, payload []byte) (<-chan []byte, error)
 	events  map[string]chan Event
 	values  map[string]map[string][]byte
 	vEvents map[string]map[string]chan Event
@@ -43,6 +44,12 @@ func (b *fakeBackend) Invoke(ctx context.Context, deviceID string, fn string, pa
 		return b.invoke(deviceID, fn, payload)
 	}
 	return []byte("ok\n"), nil
+}
+func (b *fakeBackend) InvokeStream(ctx context.Context, deviceID string, fn string, payload []byte) (<-chan []byte, error) {
+	if b.stream != nil {
+		return b.stream(deviceID, fn, payload)
+	}
+	return nil, nil
 }
 func (b *fakeBackend) SubscribeDeviceEvents(ctx context.Context, deviceID string) (<-chan Event, error) {
 	if b.events == nil {
@@ -356,6 +363,72 @@ func TestDeviceConnect_FunctionErrorFile(t *testing.T) {
 	}
 	if !strings.Contains(string(eb), "boom") {
 		t.Fatalf("error=%q", string(eb))
+	}
+}
+
+func TestDeviceConnect_FunctionStream(t *testing.T) {
+	backend := &fakeBackend{
+		devices: []Device{
+			{
+				ID:     "robot-001",
+				Type:   "robot",
+				Meta:   "id=robot-001 type=robot",
+				Status: "ok",
+				Functions: []Function{
+					{Name: "streamy", About: "Stream.", Schema: "bytes"},
+				},
+			},
+		},
+		stream: func(deviceID, fn string, payload []byte) (<-chan []byte, error) {
+			ch := make(chan []byte, 3)
+			ch <- []byte("a")
+			ch <- []byte("b")
+			ch <- []byte("c\n")
+			close(ch)
+			return ch, nil
+		},
+	}
+	addr, stop := startDeviceConnectServer(t, backend)
+	defer stop()
+
+	c, cleanup := mountClient(t, addr)
+	defer cleanup()
+
+	cl, err := c.FOpen("/devices/by-id/robot-001/functions/streamy/clone", p.OREAD)
+	if err != nil {
+		t.Fatalf("open clone: %v", err)
+	}
+	idb, err := io.ReadAll(cl)
+	_ = cl.Close()
+	if err != nil {
+		t.Fatalf("read clone: %v", err)
+	}
+	id := strings.TrimSpace(string(idb))
+	if id == "" {
+		t.Fatalf("empty clone id")
+	}
+
+	ctl, err := c.FOpen("/devices/by-id/robot-001/functions/streamy/"+id+"/ctl", p.OWRITE)
+	if err != nil {
+		t.Fatalf("open ctl: %v", err)
+	}
+	if _, err := ctl.Write([]byte("stream\n")); err != nil {
+		_ = ctl.Close()
+		t.Fatalf("ctl stream: %v", err)
+	}
+	_ = ctl.Close()
+
+	sf, err := c.FOpen("/devices/by-id/robot-001/functions/streamy/"+id+"/stream", p.OREAD)
+	if err != nil {
+		t.Fatalf("open stream: %v", err)
+	}
+	sb, err := io.ReadAll(sf)
+	_ = sf.Close()
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if string(sb) != "abc\n" {
+		t.Fatalf("stream=%q", string(sb))
 	}
 }
 
