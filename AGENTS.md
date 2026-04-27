@@ -6,6 +6,7 @@ Tweak freely.
 ## Branching and change hygiene
 
 - Do active work on `rework` unless told otherwise.
+- Push branches to the `fork` remote by default (your fork), unless explicitly asked to push elsewhere.
 - Keep `README.md`, `CHANGES.md`, and `TODO.md` updated as changes land.
 - Keep `HERZOG.md` in sync with `README.md` headings (AI-generated stylistic mirror).
 - Do not commit generated outputs (`logs/`, `kernel/`, `tmp/`, `initrd.cpio`, pid files).

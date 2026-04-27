@@ -17,6 +17,8 @@ The goal is not to faithfully reimplement Device Connect’s transport (Zenoh/NA
 - Make function calls a **filesystem protocol step** using Plan 9 conventions (`clone`, `ctl`, `data`).
 - Keep the interface **toolable** (`ls`, `cat`, `echo`) and easy to test using the `go9p` userspace client.
 
+For a quick tour of the exposed paths, also see `p/srv/examples/README.md`.
+
 ## Non-goals (for this example)
 
 - Implement Device Connect’s full server stack, commissioning, mTLS/JWT auth, ACL enforcement, or audit logging.
