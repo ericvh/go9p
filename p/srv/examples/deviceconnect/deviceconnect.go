@@ -168,83 +168,166 @@ func (f *valueFile) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) 
 	return copy(buf, out[offset:]), nil
 }
 
-// ---------- invoke/result files ----------
+// ---------- function call instances (Plan 9 style: clone/ctl/data/error) ----------
 
-type invokeFile struct {
+type callInstance struct {
+	mu sync.Mutex
+
+	req  []byte
+	resp []byte
+	err  string
+}
+
+type callDataFile struct {
+	srv.File
+	inst *callInstance
+}
+
+func (f *callDataFile) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) {
+	f.inst.mu.Lock()
+	defer f.inst.mu.Unlock()
+	if offset >= uint64(len(f.inst.resp)) {
+		return 0, nil
+	}
+	return copy(buf, f.inst.resp[offset:]), nil
+}
+
+func (f *callDataFile) Write(fid *srv.FFid, data []byte, offset uint64) (int, error) {
+	f.inst.mu.Lock()
+	defer f.inst.mu.Unlock()
+
+	need := int(offset) + len(data)
+	if need < 0 {
+		return 0, &p.Error{Err: "invalid offset", Errornum: 0}
+	}
+	if need > len(f.inst.req) {
+		n := make([]byte, need)
+		copy(n, f.inst.req)
+		f.inst.req = n
+	}
+	copy(f.inst.req[offset:], data)
+	return len(data), nil
+}
+
+type callErrFile struct {
+	srv.File
+	inst *callInstance
+}
+
+func (f *callErrFile) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) {
+	f.inst.mu.Lock()
+	defer f.inst.mu.Unlock()
+	out := []byte(f.inst.err)
+	if len(out) != 0 && out[len(out)-1] != '\n' {
+		out = append(out, '\n')
+	}
+	if offset >= uint64(len(out)) {
+		return 0, nil
+	}
+	return copy(buf, out[offset:]), nil
+}
+
+type callCtlFile struct {
 	srv.File
 	backend  Backend
 	deviceID string
 	fn       string
-
-	mu         sync.Mutex
-	lastResult []byte
-	lastErr    string
+	inst     *callInstance
 }
 
-func (f *invokeFile) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	var out []byte
-	if f.lastErr != "" {
-		out = []byte("error: " + f.lastErr + "\n")
-	} else if len(f.lastResult) == 0 {
-		out = []byte("")
-	} else {
-		out = f.lastResult
-		if len(out) == 0 || out[len(out)-1] != '\n' {
-			out = append(append([]byte(nil), out...), '\n')
-		}
-	}
-
-	if offset >= uint64(len(out)) {
-		return 0, nil
-	}
-	return copy(buf, out[offset:]), nil
-}
-
-func (f *invokeFile) Write(fid *srv.FFid, data []byte, offset uint64) (int, error) {
+func (f *callCtlFile) Write(fid *srv.FFid, data []byte, offset uint64) (int, error) {
 	if offset != 0 {
-		// Keep semantics simple: each write is a whole invocation.
-		return 0, &p.Error{Err: "invoke does not support non-zero offset writes", Errornum: 0}
+		return 0, &p.Error{Err: "ctl does not support non-zero offset writes", Errornum: 0}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	cmd := strings.TrimSpace(string(data))
+	switch cmd {
+	case "call", "invoke", "run":
+		// Snapshot request bytes.
+		f.inst.mu.Lock()
+		req := append([]byte(nil), f.inst.req...)
+		f.inst.mu.Unlock()
 
-	res, err := f.backend.Invoke(ctx, f.deviceID, f.fn, data)
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if err != nil {
-		f.lastErr = err.Error()
-		f.lastResult = nil
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		resp, err := f.backend.Invoke(ctx, f.deviceID, f.fn, req)
+		if err != nil {
+			f.inst.mu.Lock()
+			f.inst.err = err.Error()
+			f.inst.resp = nil
+			f.inst.mu.Unlock()
+			return 0, &p.Error{Err: err.Error(), Errornum: 0}
+		}
+		f.inst.mu.Lock()
+		f.inst.err = ""
+		f.inst.resp = resp
+		f.inst.mu.Unlock()
 		return len(data), nil
+	case "reset":
+		f.inst.mu.Lock()
+		f.inst.req = nil
+		f.inst.resp = nil
+		f.inst.err = ""
+		f.inst.mu.Unlock()
+		return len(data), nil
+	default:
+		return 0, &p.Error{Err: fmt.Sprintf("unknown ctl command %q", cmd), Errornum: 0}
 	}
-	f.lastErr = ""
-	f.lastResult = res
-	return len(data), nil
 }
 
-type resultFile struct {
+type funcCallState struct {
+	mu   sync.Mutex
+	next int
+}
+
+type funcCloneFile struct {
 	srv.File
-	invoke *invokeFile
+	state    *funcCallState
+	parent   *srv.File
+	user     p.User
+	backend  Backend
+	deviceID string
+	fn       string
 }
 
-func (f *resultFile) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) {
-	f.invoke.mu.Lock()
-	defer f.invoke.mu.Unlock()
-
-	out := f.invoke.lastResult
-	if out == nil {
-		out = []byte("")
-	}
-	if len(out) != 0 && out[len(out)-1] != '\n' {
-		out = append(append([]byte(nil), out...), '\n')
-	}
-	if offset >= uint64(len(out)) {
+func (f *funcCloneFile) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) {
+	if offset != 0 {
 		return 0, nil
 	}
-	return copy(buf, out[offset:]), nil
+	f.state.mu.Lock()
+	f.state.next++
+	id := f.state.next
+	f.state.mu.Unlock()
+
+	instDir := new(srv.File)
+	name := fmt.Sprintf("%d", id)
+	if err := instDir.Add(f.parent, name, f.user, nil, p.DMDIR|0o755, nil); err != nil {
+		return 0, err
+	}
+
+	inst := &callInstance{}
+	ctl := &callCtlFile{backend: f.backend, deviceID: f.deviceID, fn: f.fn, inst: inst}
+	if err := ctl.Add(instDir, "ctl", f.user, nil, 0o666, ctl); err != nil {
+		instDir.Remove()
+		return 0, err
+	}
+	dataf := &callDataFile{inst: inst}
+	if err := dataf.Add(instDir, "data", f.user, nil, 0o666, dataf); err != nil {
+		instDir.Remove()
+		return 0, err
+	}
+	errf := &callErrFile{inst: inst}
+	if err := errf.Add(instDir, "error", f.user, nil, 0o444, errf); err != nil {
+		instDir.Remove()
+		return 0, err
+	}
+
+	out := []byte(name + "\n")
+	if len(buf) < len(out) {
+		instDir.Remove()
+		return 0, &p.Error{Err: "buffer too small", Errornum: 0}
+	}
+	copy(buf, out)
+	return len(out), nil
 }
 
 // ---------- filesystem construction ----------
@@ -526,12 +609,16 @@ func (fs *DCFS) addDeviceLocked(d Device) error {
 			return err
 		}
 
-		inv := &invokeFile{backend: fs.backend, deviceID: d.ID, fn: fn.Name}
-		if err := inv.Add(fnDir, "invoke", fs.user, nil, 0o666, inv); err != nil {
-			return err
+		st := &funcCallState{}
+		cl := &funcCloneFile{
+			state:    st,
+			parent:   fnDir,
+			user:     fs.user,
+			backend:  fs.backend,
+			deviceID: d.ID,
+			fn:       fn.Name,
 		}
-		res := &resultFile{invoke: inv}
-		if err := res.Add(fnDir, "result", fs.user, nil, 0o444, res); err != nil {
+		if err := cl.Add(fnDir, "clone", fs.user, nil, 0o444, cl); err != nil {
 			return err
 		}
 	}

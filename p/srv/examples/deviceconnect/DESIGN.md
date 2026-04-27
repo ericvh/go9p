@@ -49,8 +49,11 @@ The filesystem root contains a `devices/` tree.
           <function-name>/
             about
             schema
-            invoke
-            result
+            clone
+            <call-id>/
+              ctl
+              data
+              error
 ```
 
 ### `devices/discover`
@@ -98,18 +101,33 @@ This keeps *pull* (snapshot value) distinct from *push* (events) and avoids inve
 
 This example keeps schemas textual; production systems may want JSON Schema or protobuf descriptors.
 
-### `devices/by-id/<device-id>/functions/<fn>/invoke`
+### `devices/by-id/<device-id>/functions/<fn>/clone`
 
-- **write**: invokes the function. The write payload is passed as the function input.
-- **read**: returns the last invocation result (or the last error if the most recent invocation failed).
+- **read-only**: allocates a new call instance directory (returns the numeric id).
 
-This is the key synthetic-filesystem move: **invocation is a write**.
+### `devices/by-id/<device-id>/functions/<fn>/<id>/ctl`
 
-### `devices/by-id/<device-id>/functions/<fn>/result`
+- **write-only**: control surface for the call instance.
 
-- **read-only**: synonym for “last successful result” (does not surface last error).
+Supported commands:
 
-This file exists so callers can distinguish “no result yet” vs “last call errored”.
+- `call`: invoke the function using the current request bytes written to `data`
+- `reset`: clear request/response/error buffers
+
+On failure, `ctl` returns a 9P error (Rerror). This is the “standard” mechanism.
+
+### `devices/by-id/<device-id>/functions/<fn>/<id>/data`
+
+- **read/write**:
+  - write request bytes (payload) before calling
+  - read response bytes after calling
+
+### `devices/by-id/<device-id>/functions/<fn>/<id>/error`
+
+- **read-only**: stores the last error string for the call instance.
+
+This exists because Linux kernel mounts often collapse 9P errors into generic errno values on write;
+reading `error` preserves the detailed message even when the caller can’t see the original 9P Rerror.
 
 ## Events
 

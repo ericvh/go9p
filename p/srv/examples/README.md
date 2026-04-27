@@ -266,8 +266,11 @@ Filesystem shape:
                 └── <function-name>/
                     ├── about
                     ├── schema
-                    ├── invoke
-                    └── result
+                    ├── clone
+                    └── <call-id>/
+                        ├── ctl
+                        ├── data
+                        └── error
 ```
 
 Design notes live in `p/srv/examples/deviceconnect/DESIGN.md`.

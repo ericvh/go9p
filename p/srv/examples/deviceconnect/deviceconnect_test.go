@@ -252,26 +252,110 @@ func TestDeviceConnect_InvokeAndResult(t *testing.T) {
 	c, cleanup := mountClient(t, addr)
 	defer cleanup()
 
-	inv, err := c.FOpen("/devices/by-id/robot-001/functions/echo/invoke", p.OWRITE)
+	cl, err := c.FOpen("/devices/by-id/robot-001/functions/echo/clone", p.OREAD)
 	if err != nil {
-		t.Fatalf("open invoke: %v", err)
+		t.Fatalf("open clone: %v", err)
 	}
-	if _, err := inv.Write([]byte("hi\n")); err != nil {
-		t.Fatalf("write invoke: %v", err)
+	idb, err := io.ReadAll(cl)
+	_ = cl.Close()
+	if err != nil {
+		t.Fatalf("read clone: %v", err)
 	}
-	_ = inv.Close()
+	id := strings.TrimSpace(string(idb))
+	if id == "" {
+		t.Fatalf("empty clone id")
+	}
 
-	res, err := c.FOpen("/devices/by-id/robot-001/functions/echo/result", p.OREAD)
+	dataf, err := c.FOpen("/devices/by-id/robot-001/functions/echo/"+id+"/data", p.ORDWR)
 	if err != nil {
-		t.Fatalf("open result: %v", err)
+		t.Fatalf("open data: %v", err)
 	}
-	defer res.Close()
-	got, err := io.ReadAll(res)
+	if _, err := dataf.Write([]byte("hi\n")); err != nil {
+		t.Fatalf("write data: %v", err)
+	}
+	_ = dataf.Close()
+
+	ctl, err := c.FOpen("/devices/by-id/robot-001/functions/echo/"+id+"/ctl", p.OWRITE)
 	if err != nil {
-		t.Fatalf("read result: %v", err)
+		t.Fatalf("open ctl: %v", err)
+	}
+	if _, err := ctl.Write([]byte("call\n")); err != nil {
+		t.Fatalf("ctl call: %v", err)
+	}
+	_ = ctl.Close()
+
+	dataf, err = c.FOpen("/devices/by-id/robot-001/functions/echo/"+id+"/data", p.OREAD)
+	if err != nil {
+		t.Fatalf("reopen data: %v", err)
+	}
+	got, err := io.ReadAll(dataf)
+	_ = dataf.Close()
+	if err != nil {
+		t.Fatalf("read data: %v", err)
 	}
 	if string(got) != "hi\n" {
-		t.Fatalf("result=%q", string(got))
+		t.Fatalf("data=%q", string(got))
+	}
+}
+
+func TestDeviceConnect_FunctionErrorFile(t *testing.T) {
+	backend := &fakeBackend{
+		devices: []Device{
+			{
+				ID:     "robot-001",
+				Type:   "robot",
+				Meta:   "id=robot-001 type=robot",
+				Status: "ok",
+				Functions: []Function{
+					{Name: "fail", About: "Fail.", Schema: "bytes"},
+				},
+			},
+		},
+		invoke: func(deviceID, fn string, payload []byte) ([]byte, error) {
+			return nil, errors.New("boom")
+		},
+	}
+	addr, stop := startDeviceConnectServer(t, backend)
+	defer stop()
+
+	c, cleanup := mountClient(t, addr)
+	defer cleanup()
+
+	cl, err := c.FOpen("/devices/by-id/robot-001/functions/fail/clone", p.OREAD)
+	if err != nil {
+		t.Fatalf("open clone: %v", err)
+	}
+	idb, err := io.ReadAll(cl)
+	_ = cl.Close()
+	if err != nil {
+		t.Fatalf("read clone: %v", err)
+	}
+	id := strings.TrimSpace(string(idb))
+	if id == "" {
+		t.Fatalf("empty clone id")
+	}
+
+	ctl, err := c.FOpen("/devices/by-id/robot-001/functions/fail/"+id+"/ctl", p.OWRITE)
+	if err != nil {
+		t.Fatalf("open ctl: %v", err)
+	}
+	_, err = ctl.Write([]byte("call\n"))
+	_ = ctl.Close()
+	if err == nil {
+		t.Fatalf("expected ctl call to fail")
+	}
+
+	ef, err := c.FOpen("/devices/by-id/robot-001/functions/fail/"+id+"/error", p.OREAD)
+	if err != nil {
+		t.Fatalf("open error: %v", err)
+	}
+	eb, err := io.ReadAll(ef)
+	_ = ef.Close()
+	if err != nil {
+		t.Fatalf("read error: %v", err)
+	}
+	if !strings.Contains(string(eb), "boom") {
+		t.Fatalf("error=%q", string(eb))
 	}
 }
 
