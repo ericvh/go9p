@@ -253,6 +253,15 @@ Filesystem shape:
         └── <device-id>/
             ├── meta
             ├── status
+            ├── events/
+            │   ├── replay
+            │   └── stream
+            ├── values/
+            │   └── <value-name>/
+            │       ├── value
+            │       └── events/
+            │           ├── replay
+            │           └── stream
             └── functions/
                 └── <function-name>/
                     ├── about

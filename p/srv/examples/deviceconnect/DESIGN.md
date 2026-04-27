@@ -36,6 +36,15 @@ The filesystem root contains a `devices/` tree.
       <device-id>/
         meta
         status
+        events/
+          replay
+          stream
+        values/
+          <value-name>/
+            value
+            events/
+              replay
+              stream
         functions/
           <function-name>/
             about
@@ -58,6 +67,26 @@ This is intentionally simple: it’s a discoverability “index” and a manual 
 ### `devices/by-id/<device-id>/status`
 
 - **read-only**: status / health / availability (human-readable text).
+
+## Values (device-level readings)
+
+Many devices expose “simple readings” (temperature, humidity, battery %, etc.) that are conceptually **values**
+rather than “functions you invoke”. Device Connect’s examples show `@rpc` and `@emit`; this example adds a values
+projection so a consumer can do:
+
+- `cat .../values/temp/value`
+- optionally tail or page through `.../values/temp/events/replay`
+
+This keeps *pull* (snapshot value) distinct from *push* (events) and avoids inventing a “get_*” function purely for reads.
+
+### `devices/by-id/<device-id>/values/<name>/value`
+
+- **read-only**: a snapshot of the current value.
+- value is textual in this example (typically a single line).
+
+### `devices/by-id/<device-id>/values/<name>/events/{replay,stream}`
+
+- identical semantics to device-level `events/*`, but scoped to a particular value stream.
 
 ### `devices/by-id/<device-id>/functions/<fn>/about`
 
@@ -82,13 +111,34 @@ This is the key synthetic-filesystem move: **invocation is a write**.
 
 This file exists so callers can distinguish “no result yet” vs “last call errored”.
 
+## Events
+
+Device Connect exposes event-style outputs via `@emit` (and `subscribe()` on the agent side).
+This example surfaces that idea per-device:
+
+### `devices/by-id/<device-id>/events/replay`
+
+- **read-only**: returns a bounded, newline-delimited log of recent events for the device.
+- read supports offsets, so callers can page through a large log using repeated reads with increasing offsets.
+
+### `devices/by-id/<device-id>/events/stream`
+
+- **read-only**: returns the same underlying log as `replay`.
+
+In a production-grade server, `stream` would typically **block** waiting for new events when a client reads at EOF,
+or expose an indirection handle to a native stream transport. This example keeps `stream` non-blocking so tests and
+simple tooling do not hang.
+
 ## Backend contract
 
 Internally, the filesystem talks to a backend interface:
 
 - list devices
 - get per-device metadata/status and function inventory
+- read per-device values (snapshot reads)
 - invoke a function
+ - subscribe to per-device events
+ - optionally subscribe to per-value events
 
 In this repo, tests use a **fake backend** and interact with the example exclusively through the **Go 9P client** (`p/clnt`).
 

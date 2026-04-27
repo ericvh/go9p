@@ -18,14 +18,85 @@ import (
 type fakeBackend struct {
 	devices []Device
 	invoke  func(deviceID, fn string, payload []byte) ([]byte, error)
+	events  map[string]chan Event
+	values  map[string]map[string][]byte
+	vEvents map[string]map[string]chan Event
 }
 
 func (b *fakeBackend) ListDevices(ctx context.Context) ([]Device, error) { return b.devices, nil }
+func (b *fakeBackend) ReadValue(ctx context.Context, deviceID string, name string) ([]byte, error) {
+	if b.values == nil {
+		return nil, errors.New("values not supported")
+	}
+	m, ok := b.values[deviceID]
+	if !ok {
+		return nil, errors.New("unknown device")
+	}
+	v, ok := m[name]
+	if !ok {
+		return nil, errors.New("unknown value")
+	}
+	return append([]byte(nil), v...), nil
+}
 func (b *fakeBackend) Invoke(ctx context.Context, deviceID string, fn string, payload []byte) ([]byte, error) {
 	if b.invoke != nil {
 		return b.invoke(deviceID, fn, payload)
 	}
 	return []byte("ok\n"), nil
+}
+func (b *fakeBackend) SubscribeDeviceEvents(ctx context.Context, deviceID string) (<-chan Event, error) {
+	if b.events == nil {
+		return nil, nil
+	}
+	ch, ok := b.events[deviceID]
+	if !ok {
+		return nil, nil
+	}
+	out := make(chan Event, 16)
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ev, ok := <-ch:
+				if !ok {
+					return
+				}
+				out <- ev
+			}
+		}
+	}()
+	return out, nil
+}
+func (b *fakeBackend) SubscribeValueEvents(ctx context.Context, deviceID string, valueName string) (<-chan Event, error) {
+	if b.vEvents == nil {
+		return nil, nil
+	}
+	dm, ok := b.vEvents[deviceID]
+	if !ok {
+		return nil, nil
+	}
+	ch, ok := dm[valueName]
+	if !ok {
+		return nil, nil
+	}
+	out := make(chan Event, 16)
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ev, ok := <-ch:
+				if !ok {
+					return
+				}
+				out <- ev
+			}
+		}
+	}()
+	return out, nil
 }
 
 func startDeviceConnectServer(t *testing.T, backend Backend) (addr string, stop func()) {
@@ -83,10 +154,16 @@ func TestDeviceConnect_DiscoverAndHierarchy(t *testing.T) {
 				Type:   "sensor",
 				Meta:   "id=sensor-001 type=sensor",
 				Status: "ok",
+				Values: []Value{
+					{Name: "temp", About: "Temperature", Unit: "C"},
+				},
 				Functions: []Function{
 					{Name: "get_reading", About: "Return reading.", Schema: "write: none"},
 				},
 			},
+		},
+		values: map[string]map[string][]byte{
+			"sensor-001": {"temp": []byte("22.5")},
 		},
 	}
 	addr, stop := startDeviceConnectServer(t, backend)
@@ -133,6 +210,19 @@ func TestDeviceConnect_DiscoverAndHierarchy(t *testing.T) {
 	}
 	if !strings.Contains(string(ab), "Return reading") {
 		t.Fatalf("about=%q", string(ab))
+	}
+
+	vf, err := c.FOpen("/devices/by-id/sensor-001/values/temp/value", p.OREAD)
+	if err != nil {
+		t.Fatalf("open value: %v", err)
+	}
+	defer vf.Close()
+	vb, err := io.ReadAll(vf)
+	if err != nil {
+		t.Fatalf("read value: %v", err)
+	}
+	if strings.TrimSpace(string(vb)) != "22.5" {
+		t.Fatalf("value=%q", string(vb))
 	}
 }
 
@@ -182,5 +272,90 @@ func TestDeviceConnect_InvokeAndResult(t *testing.T) {
 	}
 	if string(got) != "hi\n" {
 		t.Fatalf("result=%q", string(got))
+	}
+}
+
+func TestDeviceConnect_DeviceEventsReplay(t *testing.T) {
+	src := make(chan Event, 8)
+	backend := &fakeBackend{
+		devices: []Device{
+			{
+				ID:     "sensor-001",
+				Type:   "sensor",
+				Meta:   "id=sensor-001 type=sensor",
+				Status: "ok",
+			},
+		},
+		events: map[string]chan Event{
+			"sensor-001": src,
+		},
+	}
+	addr, stop := startDeviceConnectServer(t, backend)
+	defer stop()
+
+	// Emit an event after server is up.
+	src <- Event{DeviceID: "sensor-001", Topic: "event.alert", Payload: []byte("hot")}
+
+	c, cleanup := mountClient(t, addr)
+	defer cleanup()
+
+	f, err := c.FOpen("/devices/by-id/sensor-001/events/replay", p.OREAD)
+	if err != nil {
+		t.Fatalf("open replay: %v", err)
+	}
+	defer f.Close()
+
+	got, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("read replay: %v", err)
+	}
+	s := string(got)
+	if !strings.Contains(s, "event.alert") || !strings.Contains(s, "hot") {
+		t.Fatalf("replay=%q", s)
+	}
+}
+
+func TestDeviceConnect_ValueEventsReplay(t *testing.T) {
+	src := make(chan Event, 8)
+	backend := &fakeBackend{
+		devices: []Device{
+			{
+				ID:     "sensor-001",
+				Type:   "sensor",
+				Meta:   "id=sensor-001 type=sensor",
+				Status: "ok",
+				Values: []Value{
+					{Name: "temp", About: "Temperature", Unit: "C"},
+				},
+			},
+		},
+		values: map[string]map[string][]byte{
+			"sensor-001": {"temp": []byte("21.0")},
+		},
+		vEvents: map[string]map[string]chan Event{
+			"sensor-001": {"temp": src},
+		},
+	}
+	addr, stop := startDeviceConnectServer(t, backend)
+	defer stop()
+
+	src <- Event{DeviceID: "sensor-001", Topic: "value.temp", Payload: []byte("21.0")}
+
+	c, cleanup := mountClient(t, addr)
+	defer cleanup()
+
+	f, err := c.FOpen("/devices/by-id/sensor-001/values/temp/events/replay", p.OREAD)
+	if err != nil {
+		t.Fatalf("open replay: %v", err)
+	}
+	defer f.Close()
+
+	got, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("read replay: %v", err)
+	}
+	s := string(got)
+	if !strings.Contains(s, "value.temp") || !strings.Contains(s, "21.0") {
+		t.Fatalf("replay=%q", s)
 	}
 }

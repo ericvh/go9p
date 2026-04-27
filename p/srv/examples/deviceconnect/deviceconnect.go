@@ -31,6 +31,7 @@ type Device struct {
 	Type      string
 	Meta      string
 	Status    string
+	Values    []Value
 	Functions []Function
 }
 
@@ -40,9 +41,31 @@ type Function struct {
 	Schema string
 }
 
+type Value struct {
+	Name  string
+	About string
+	Unit  string
+}
+
+type Event struct {
+	DeviceID string
+	Topic    string
+	Payload  []byte
+	Time     time.Time
+}
+
 type Backend interface {
 	ListDevices(ctx context.Context) ([]Device, error)
+	ReadValue(ctx context.Context, deviceID string, name string) ([]byte, error)
 	Invoke(ctx context.Context, deviceID string, fn string, payload []byte) ([]byte, error)
+
+	// SubscribeDeviceEvents returns a stream of events for a device until ctx is
+	// cancelled. Implementations should return (nil, nil) when events are not supported.
+	SubscribeDeviceEvents(ctx context.Context, deviceID string) (<-chan Event, error)
+
+	// SubscribeValueEvents returns a stream of events for a particular device value.
+	// Implementations should return (nil, nil) when not supported.
+	SubscribeValueEvents(ctx context.Context, deviceID string, valueName string) (<-chan Event, error)
 }
 
 // ---------- simple file helpers ----------
@@ -58,6 +81,91 @@ func (f *roTextFile) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error)
 	}
 	n := copy(buf, f.data[offset:])
 	return n, nil
+}
+
+type eventLog struct {
+	mu   sync.Mutex
+	buf  []byte
+	keep int
+}
+
+func newEventLog(keep int) *eventLog {
+	if keep <= 0 {
+		keep = 64 * 1024
+	}
+	return &eventLog{keep: keep}
+}
+
+func (l *eventLog) appendLine(line []byte) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.buf = append(l.buf, line...)
+	if len(l.buf) <= l.keep {
+		return
+	}
+	// Drop from the front; best-effort keep UTF-8/text integrity by trimming to the next '\n'.
+	cut := len(l.buf) - l.keep
+	if cut < 0 {
+		cut = 0
+	}
+	if cut >= len(l.buf) {
+		l.buf = nil
+		return
+	}
+	// Seek to the next newline boundary.
+	nl := bytesIndexByte(l.buf[cut:], '\n')
+	if nl >= 0 {
+		cut = cut + nl + 1
+	}
+	l.buf = append([]byte(nil), l.buf[cut:]...)
+}
+
+func bytesIndexByte(b []byte, c byte) int {
+	for i := range b {
+		if b[i] == c {
+			return i
+		}
+	}
+	return -1
+}
+
+type eventLogFile struct {
+	srv.File
+	log *eventLog
+}
+
+func (f *eventLogFile) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) {
+	f.log.mu.Lock()
+	defer f.log.mu.Unlock()
+	if offset >= uint64(len(f.log.buf)) {
+		return 0, nil
+	}
+	return copy(buf, f.log.buf[offset:]), nil
+}
+
+type valueFile struct {
+	srv.File
+	backend  Backend
+	deviceID string
+	name     string
+}
+
+func (f *valueFile) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	b, err := f.backend.ReadValue(ctx, f.deviceID, f.name)
+	if err != nil {
+		// Model as read error (like a sensor not available).
+		return 0, &p.Error{Err: err.Error(), Errornum: 0}
+	}
+	out := b
+	if len(out) != 0 && out[len(out)-1] != '\n' {
+		out = append(append([]byte(nil), out...), '\n')
+	}
+	if offset >= uint64(len(out)) {
+		return 0, nil
+	}
+	return copy(buf, out[offset:]), nil
 }
 
 // ---------- invoke/result files ----------
@@ -153,13 +261,21 @@ type DCFS struct {
 	// We keep our own index of created directories because srv.File's child list
 	// is internal to the srv package.
 	deviceDirs map[string]*srv.File
+
+	// Per-device event subscription cancels (best-effort cleanup on refresh).
+	eventCancels map[string]context.CancelFunc
+
+	// Per-device-value event cancels (best-effort cleanup on refresh).
+	valueEventCancels map[string]context.CancelFunc
 }
 
 func buildDeviceConnectFS(backend Backend) (*DCFS, error) {
 	fs := &DCFS{
-		backend:    backend,
-		user:       p.OsUsers.Uid2User(os.Geteuid()),
-		deviceDirs: make(map[string]*srv.File),
+		backend:           backend,
+		user:              p.OsUsers.Uid2User(os.Geteuid()),
+		deviceDirs:        make(map[string]*srv.File),
+		eventCancels:      make(map[string]context.CancelFunc),
+		valueEventCancels: make(map[string]context.CancelFunc),
 	}
 
 	fs.root = new(srv.File)
@@ -195,11 +311,6 @@ type discoverFile struct {
 }
 
 func (f *discoverFile) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) {
-	// Reading discover is also a convenient place to refresh before listing.
-	f.fs.mu.Lock()
-	_ = f.fs.refreshLocked(context.Background())
-	f.fs.mu.Unlock()
-
 	f.fs.mu.Lock()
 	defer f.fs.mu.Unlock()
 
@@ -243,6 +354,15 @@ func (fs *DCFS) refreshLocked(ctx context.Context) error {
 	}
 	clear(fs.deviceDirs)
 
+	for _, cancel := range fs.eventCancels {
+		cancel()
+	}
+	clear(fs.eventCancels)
+	for _, cancel := range fs.valueEventCancels {
+		cancel()
+	}
+	clear(fs.valueEventCancels)
+
 	// Rebuild.
 	sort.Slice(devs, func(i, j int) bool { return devs[i].ID < devs[j].ID })
 	for _, d := range devs {
@@ -272,6 +392,114 @@ func (fs *DCFS) addDeviceLocked(d Device) error {
 	status := &roTextFile{data: []byte(strings.TrimSpace(d.Status) + "\n")}
 	if err := status.Add(devDir, "status", fs.user, nil, 0o444, status); err != nil {
 		return err
+	}
+
+	eventsDir := new(srv.File)
+	if err := eventsDir.Add(devDir, "events", fs.user, nil, p.DMDIR|0o755, nil); err != nil {
+		return err
+	}
+	logbuf := newEventLog(64 * 1024)
+
+	replay := &eventLogFile{log: logbuf}
+	if err := replay.Add(eventsDir, "replay", fs.user, nil, 0o444, replay); err != nil {
+		return err
+	}
+	stream := &eventLogFile{log: logbuf}
+	if err := stream.Add(eventsDir, "stream", fs.user, nil, 0o444, stream); err != nil {
+		return err
+	}
+
+	// Subscribe in the background if supported by the backend.
+	evctx, cancel := context.WithCancel(context.Background())
+	ch, err := fs.backend.SubscribeDeviceEvents(evctx, d.ID)
+	if err == nil && ch != nil {
+		fs.eventCancels[d.ID] = cancel
+		go func() {
+			for ev := range ch {
+				ts := ev.Time
+				if ts.IsZero() {
+					ts = time.Now()
+				}
+				topic := strings.TrimSpace(ev.Topic)
+				if topic == "" {
+					topic = "event"
+				}
+				payload := strings.TrimRight(string(ev.Payload), "\n")
+				line := fmt.Sprintf("%s\t%s\t%s\n", ts.UTC().Format(time.RFC3339Nano), topic, payload)
+				logbuf.appendLine([]byte(line))
+			}
+		}()
+	} else {
+		cancel()
+	}
+
+	// Values: device-level readings (separate from functions).
+	valuesDir := new(srv.File)
+	if err := valuesDir.Add(devDir, "values", fs.user, nil, p.DMDIR|0o755, nil); err != nil {
+		return err
+	}
+	sort.Slice(d.Values, func(i, j int) bool { return d.Values[i].Name < d.Values[j].Name })
+	for _, v := range d.Values {
+		if strings.TrimSpace(v.Name) == "" {
+			continue
+		}
+		vdir := new(srv.File)
+		if err := vdir.Add(valuesDir, v.Name, fs.user, nil, p.DMDIR|0o755, nil); err != nil {
+			return err
+		}
+		about := strings.TrimSpace(v.About)
+		if about == "" {
+			about = v.Name
+		}
+		if v.Unit != "" {
+			about = about + " (unit: " + v.Unit + ")"
+		}
+		vabout := &roTextFile{data: []byte(about + "\n")}
+		if err := vabout.Add(vdir, "about", fs.user, nil, 0o444, vabout); err != nil {
+			return err
+		}
+
+		vf := &valueFile{backend: fs.backend, deviceID: d.ID, name: v.Name}
+		if err := vf.Add(vdir, "value", fs.user, nil, 0o444, vf); err != nil {
+			return err
+		}
+
+		vedir := new(srv.File)
+		if err := vedir.Add(vdir, "events", fs.user, nil, p.DMDIR|0o755, nil); err != nil {
+			return err
+		}
+		vlog := newEventLog(64 * 1024)
+		vreplay := &eventLogFile{log: vlog}
+		if err := vreplay.Add(vedir, "replay", fs.user, nil, 0o444, vreplay); err != nil {
+			return err
+		}
+		vstream := &eventLogFile{log: vlog}
+		if err := vstream.Add(vedir, "stream", fs.user, nil, 0o444, vstream); err != nil {
+			return err
+		}
+
+		evctx, cancel := context.WithCancel(context.Background())
+		ch, err := fs.backend.SubscribeValueEvents(evctx, d.ID, v.Name)
+		if err == nil && ch != nil {
+			fs.valueEventCancels[d.ID+"|"+v.Name] = cancel
+			go func() {
+				for ev := range ch {
+					ts := ev.Time
+					if ts.IsZero() {
+						ts = time.Now()
+					}
+					topic := strings.TrimSpace(ev.Topic)
+					if topic == "" {
+						topic = "event"
+					}
+					payload := strings.TrimRight(string(ev.Payload), "\n")
+					line := fmt.Sprintf("%s\t%s\t%s\n", ts.UTC().Format(time.RFC3339Nano), topic, payload)
+					vlog.appendLine([]byte(line))
+				}
+			}()
+		} else {
+			cancel()
+		}
 	}
 
 	funcsDir := new(srv.File)
@@ -327,6 +555,11 @@ func (b *demoBackend) ListDevices(ctx context.Context) ([]Device, error) {
 	return out, nil
 }
 
+func (b *demoBackend) ReadValue(ctx context.Context, deviceID string, name string) ([]byte, error) {
+	// Demo: return a stable placeholder; real integrations would read from the mesh/device.
+	return []byte("0"), nil
+}
+
 func (b *demoBackend) Invoke(ctx context.Context, deviceID string, fn string, payload []byte) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -355,6 +588,16 @@ func (b *demoBackend) Invoke(ctx context.Context, deviceID string, fn string, pa
 	return nil, fmt.Errorf("unknown device %q", deviceID)
 }
 
+func (b *demoBackend) SubscribeDeviceEvents(ctx context.Context, deviceID string) (<-chan Event, error) {
+	// Demo backend doesn't emit events.
+	return nil, nil
+}
+
+func (b *demoBackend) SubscribeValueEvents(ctx context.Context, deviceID string, valueName string) (<-chan Event, error) {
+	// Demo backend doesn't emit value events.
+	return nil, nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -365,6 +608,10 @@ func main() {
 				Type:   "sensor",
 				Meta:   "id=sensor-001 type=sensor",
 				Status: "ok",
+				Values: []Value{
+					{Name: "temp", About: "Temperature", Unit: "C"},
+					{Name: "humidity", About: "Relative humidity", Unit: "%"},
+				},
 				Functions: []Function{
 					{Name: "get_reading", About: "Return current reading (demo).", Schema: "write: ignored\nread: returns a demo reading"},
 					{Name: "ping", About: "Liveness check.", Schema: "write: optional\nread: pong"},
@@ -375,6 +622,9 @@ func main() {
 				Type:   "robot",
 				Meta:   "id=robot-001 type=robot",
 				Status: "ok",
+				Values: []Value{
+					{Name: "battery", About: "Battery level", Unit: "%"},
+				},
 				Functions: []Function{
 					{Name: "echo", About: "Echo the request bytes.", Schema: "write: arbitrary bytes\nread: same bytes"},
 					{Name: "move", About: "Move the robot (demo stub).", Schema: "write: \"x y\" or JSON\nread: ok"},
