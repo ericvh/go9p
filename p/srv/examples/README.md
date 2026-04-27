@@ -231,3 +231,41 @@ Additional surface currently present (minimal/stubbed):
 - `bridge(3)`:
   - `/net/bridge0/{ctl,cache,log,stats}` (control is logged; no packet forwarding yet)
 
+### `deviceconnect` (Device Connect devices + functions)
+
+`deviceconnect` is a synthetic filesystem example that projects a Device Connect-style object model
+([`deviceconnect.dev`](https://deviceconnect.dev/)) into a hierarchical 9P namespace.
+
+It’s designed around **devices** and their **functions** (Device Connect `@rpc` style), and uses
+filesystem operations as protocol steps:
+
+- **read** to discover devices and inspect metadata/status
+- **write** to invoke a function
+- **read** to retrieve the last result (or last error)
+
+Filesystem shape:
+
+```text
+/
+└── devices/
+    ├── discover
+    └── by-id/
+        └── <device-id>/
+            ├── meta
+            ├── status
+            └── functions/
+                └── <function-name>/
+                    ├── about
+                    ├── schema
+                    ├── invoke
+                    └── result
+```
+
+Design notes live in `p/srv/examples/deviceconnect/DESIGN.md`.
+
+Run:
+
+```bash
+go run ./p/srv/examples/deviceconnect -addr 127.0.0.1:5640
+```
+
