@@ -19,6 +19,8 @@ curl -fsSL "https://github.com/v9fs/test/releases/download/${VMLINUX_TAG}/Image"
 echo "[host] building go9p binaries"
 cd /opt/v9fs/go9p
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -buildvcs=false -o /opt/v9fs/kernel9p-e2e ./cmd/kernel9p-e2e
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -buildvcs=false -o /opt/v9fs/go9p-knetfs ./cmd/go9p-knetfs
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -buildvcs=false -o /opt/v9fs/go9p-kdeviceconnect ./cmd/go9p-kdeviceconnect
 go build -buildvcs=false -o "/opt/v9fs/go9p-${FS}" "./p/srv/examples/${FS}"
 
 echo "[host] building u-root initrd (uinitcmd: mount hostshare -> chroot -> guest-e2e-fs.sh)"

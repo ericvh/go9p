@@ -30,6 +30,35 @@ go run ./p/srv/examples/<name> -addr 127.0.0.1:5640
 
 Then use one of the client examples in `p/clnt/examples/` (e.g. `ls`, `read`, `write`) to interact with it.
 
+### Purpose-built CLIs for example filesystems
+
+In addition to the low-level client examples, this repo now includes a few **higher-level CLI tools** under `cmd/`
+that understand some of the example filesystem conventions directly:
+
+- `cmd/go9p-netfs`: netfs-specific tooling (currently `tcp-dial`, an `nc`-like helper around `/net/tcp/clone` + `ctl` + `data`).
+- `cmd/go9p-deviceconnect`: deviceconnect-specific tooling (`discover`, `meta`, `status`, `value`, `call`).
+- `cmd/go9p-session`: a small **session REPL** that’s handy for clone-based workflows (e.g. `clonefs`, `/net/tcp/clone`,
+  and deviceconnect function `clone`).
+
+Examples:
+
+```bash
+# netfs: "nc"-like TCP via /net/tcp.
+go run ./cmd/go9p-netfs tcp-dial -addr 127.0.0.1:5640 example.com!80
+
+# deviceconnect: discover devices and invoke a function.
+go run ./cmd/go9p-deviceconnect discover -addr 127.0.0.1:5640
+go run ./cmd/go9p-deviceconnect call -addr 127.0.0.1:5640 -id robot-001 -fn echo -payload "hello"
+
+# clonefs (or any clone semantics): keep the clone id in a session variable.
+go run ./cmd/go9p-session -addr 127.0.0.1:5640
+# then:
+#   clone /clone
+#   cat $last
+#   write $last hello
+#   cat $last
+```
+
 ### `ufs` (Unix filesystem export)
 
 - **Purpose**: export a real host directory tree over 9P (reference “real FS” server).

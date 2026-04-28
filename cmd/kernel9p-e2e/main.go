@@ -274,6 +274,20 @@ func kernelNetFSSmoke(root string) {
 	_ = readAll(filepath.Join(netdir, "tcp", id, "status"))
 }
 
+func kernelDeviceConnectSmoke(root string) {
+	dev := filepath.Join(root, "devices")
+	st, err := os.Stat(dev)
+	must(err, "stat /devices")
+	if !st.IsDir() {
+		must(fmt.Errorf("/devices not a directory"), "devices is dir")
+	}
+	disc := strings.TrimSpace(string(readAll(filepath.Join(dev, "discover"))))
+	if disc == "" {
+		// The backend in the example always seeds devices; treat empty as failure.
+		must(fmt.Errorf("empty discover"), "deviceconnect discover non-empty")
+	}
+}
+
 func dial9P(addr string, timeout time.Duration) (net.Conn, error) {
 	deadline := time.Now().Add(timeout)
 	for {
@@ -369,6 +383,9 @@ func main() {
 	case "netfs":
 		kernelNetFSSmoke(mount)
 		fmt.Println("PASS: kernel netfs mount smoke")
+	case "deviceconnect":
+		kernelDeviceConnectSmoke(mount)
+		fmt.Println("PASS: kernel deviceconnect mount smoke")
 	default:
 		must(fmt.Errorf("unknown KERNEL9P_FS=%q", fs), "select fs mode")
 	}

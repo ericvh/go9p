@@ -95,6 +95,9 @@ jobs:
           - arch: arm64
             runs_on: ubuntu-24.04-arm
             fs: netfs
+          - arch: arm64
+            runs_on: ubuntu-24.04-arm
+            fs: deviceconnect
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 90
 

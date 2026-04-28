@@ -21,10 +21,29 @@ mount_and_run() {
 
   mkdir -p "${mnt}"
   echo "[guest] mounting kernel 9p client via tcp ${SERVER_ADDR}:${SERVER_PORT} (fs=${FS} version=${version}) -> ${mnt}"
-  mount -t 9p -o "trans=tcp,version=${version},msize=262144,port=${SERVER_PORT},uname=${UNAME},uid=${UID_OPT},gid=${GID_OPT}" "${SERVER_ADDR}" "${mnt}"
+  opts="trans=tcp,version=${version},msize=262144,port=${SERVER_PORT},uname=${UNAME},uid=${UID_OPT},gid=${GID_OPT}"
+  # Some synthetic servers don't model full Unix permission semantics; permit access for CLI checks.
+  if [ "${FS}" = "deviceconnect" ]; then
+    opts="${opts},access=any"
+  fi
+  mount -t 9p -o "${opts}" "${SERVER_ADDR}" "${mnt}"
 
   echo "[guest] running kernel9p-e2e against mount ${mnt} (fs=${FS} server=${server_mode})"
   KERNEL9P_FS="${FS}" KERNEL9P_SERVER="${server_mode}" KERNEL9P_TCP_ADDR="${SERVER_ADDR}" KERNEL9P_TCP_PORT="${SERVER_PORT}" KERNEL9P_MOUNT="${mnt}" /opt/v9fs/kernel9p-e2e
+
+  # Also exercise the "kernel-mounted" CLI tools against the mounted tree.
+  case "${FS}" in
+    netfs)
+      echo "[guest] running kernel-mounted CLI checks (netfs)"
+      /opt/v9fs/go9p-knetfs -netroot "${mnt}/net" tcp-alloc >/dev/null
+      ;;
+    deviceconnect)
+      echo "[guest] running kernel-mounted CLI checks (deviceconnect)"
+      /opt/v9fs/go9p-kdeviceconnect -root "${mnt}/devices" discover >/dev/null
+      /opt/v9fs/go9p-kdeviceconnect -root "${mnt}/devices" meta -id robot-001 >/dev/null
+      /opt/v9fs/go9p-kdeviceconnect -root "${mnt}/devices" status -id robot-001 >/dev/null
+      ;;
+  esac
 
   echo "[guest] unmounting ${mnt}"
   umount "${mnt}"
@@ -38,6 +57,11 @@ case "${FS}" in
     ;;
   ramfs|clonefs|timefs|netfs)
     # Kernel mount smoke only; behavior is tailored inside kernel9p-e2e by KERNEL9P_FS.
+    mount_and_run "9p2000.u" "${MNT_BASE}-9p2000u" "kernel-only"
+    mount_and_run "9p2000" "${MNT_BASE}-9p2000" "kernel-only"
+    ;;
+  deviceconnect)
+    # Kernel mount + CLI exercise only.
     mount_and_run "9p2000.u" "${MNT_BASE}-9p2000u" "kernel-only"
     mount_and_run "9p2000" "${MNT_BASE}-9p2000" "kernel-only"
     ;;

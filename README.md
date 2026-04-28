@@ -86,6 +86,18 @@ More detailed documentation for the example programs lives alongside the code:
 - Server examples: `p/srv/examples/README.md`
 - Client examples: `p/clnt/examples/README.md`
 
+### Higher-level CLI tools
+
+This repo also includes a small set of **higher-level CLI tools** under `cmd/` for interacting with the more “protocol-y”
+example synthetic filesystems (`netfs`, `deviceconnect`, clone-style interfaces).
+
+Documentation lives in `docs/`:
+
+- `docs/README.md`
+- `docs/cli-netfs.md`
+- `docs/cli-deviceconnect.md`
+- `docs/cli-session.md`
+
 ### Plan 9-style `/net` example (`netfs`)
 
 This repo includes `netfs`, a synthetic filesystem that models a small (and still evolving) subset of
