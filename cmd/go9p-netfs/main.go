@@ -24,10 +24,22 @@ func cmdTCPDial(args []string) {
 	fs.SetOutput(os.Stderr)
 
 	var cf cli9p.ConnFlags
+	// Canonical defaults (override via GO9P_NETFS_ADDR or GO9P_ADDR).
+	cf.Addr = strings.TrimSpace(os.Getenv("GO9P_NETFS_ADDR"))
+	if cf.Addr == "" {
+		cf.Addr = strings.TrimSpace(os.Getenv("GO9P_ADDR"))
+	}
+	if cf.Addr == "" {
+		cf.Addr = "127.0.0.1:5641"
+	}
 	cf.Register(fs)
 
 	var netRoot string
-	fs.StringVar(&netRoot, "netroot", "/net", "path to net root (usually /net)")
+	netRoot = strings.TrimSpace(os.Getenv("GO9P_NETROOT"))
+	if netRoot == "" {
+		netRoot = "/net"
+	}
+	fs.StringVar(&netRoot, "netroot", netRoot, "path to net root (usually /net)")
 
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)

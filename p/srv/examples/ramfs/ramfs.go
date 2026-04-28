@@ -27,7 +27,7 @@ type RFile struct {
 	data [][]byte
 }
 
-var addr = flag.String("addr", ":5640", "network address")
+var addr = flag.String("addr", ":5645", "network address")
 var debug = flag.Int("d", 0, "debuglevel")
 var blksize = flag.Int("b", 8192, "block size")
 var logsz = flag.Int("l", 2048, "log size")

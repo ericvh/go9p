@@ -11,7 +11,7 @@ There are two CLI tools to make it easier to use:
 ### Run the server
 
 ```bash
-go run ./p/srv/examples/deviceconnect -addr 127.0.0.1:5640
+go run ./p/srv/examples/deviceconnect
 ```
 
 ### Discover devices
@@ -19,7 +19,7 @@ go run ./p/srv/examples/deviceconnect -addr 127.0.0.1:5640
 #### go9p-client
 
 ```bash
-go run ./cmd/go9p-deviceconnect discover -addr 127.0.0.1:5640
+go run ./cmd/go9p-deviceconnect discover
 ```
 
 #### kernel-mounted
@@ -27,35 +27,35 @@ go run ./cmd/go9p-deviceconnect discover -addr 127.0.0.1:5640
 If the mounted tree exposes `/devices` at `/mnt/9p/devices`:
 
 ```bash
-go run ./cmd/go9p-kdeviceconnect -root /mnt/9p/devices discover
+go run ./cmd/go9p-kdeviceconnect discover
 ```
 
 ### Read metadata/status/value
 
 ```bash
-go run ./cmd/go9p-deviceconnect meta   -addr 127.0.0.1:5640 -id robot-001
-go run ./cmd/go9p-deviceconnect status -addr 127.0.0.1:5640 -id robot-001
-go run ./cmd/go9p-deviceconnect value  -addr 127.0.0.1:5640 -id sensor-001 -name temp
+go run ./cmd/go9p-deviceconnect meta   -id robot-001
+go run ./cmd/go9p-deviceconnect status -id robot-001
+go run ./cmd/go9p-deviceconnect value  -id sensor-001 -name temp
 ```
 
 Kernel-mounted equivalents:
 
 ```bash
-go run ./cmd/go9p-kdeviceconnect -root /mnt/9p/devices meta   -id robot-001
-go run ./cmd/go9p-kdeviceconnect -root /mnt/9p/devices status -id robot-001
-go run ./cmd/go9p-kdeviceconnect -root /mnt/9p/devices value  -id sensor-001 -name temp
+go run ./cmd/go9p-kdeviceconnect meta   -id robot-001
+go run ./cmd/go9p-kdeviceconnect status -id robot-001
+go run ./cmd/go9p-kdeviceconnect value  -id sensor-001 -name temp
 ```
 
 ### Invoke a function (`call`)
 
 ```bash
-go run ./cmd/go9p-deviceconnect call -addr 127.0.0.1:5640 -id robot-001 -fn echo -payload "hello"
+go run ./cmd/go9p-deviceconnect call -id robot-001 -fn echo -payload "hello"
 ```
 
 Kernel-mounted:
 
 ```bash
-go run ./cmd/go9p-kdeviceconnect -root /mnt/9p/devices call -id robot-001 -fn echo -payload "hello"
+go run ./cmd/go9p-kdeviceconnect call -id robot-001 -fn echo -payload "hello"
 ```
 
 ### Streaming mode
@@ -63,6 +63,6 @@ go run ./cmd/go9p-kdeviceconnect -root /mnt/9p/devices call -id robot-001 -fn ec
 If a backend supports it, you can request streaming mode:
 
 ```bash
-go run ./cmd/go9p-deviceconnect call -addr 127.0.0.1:5640 -id robot-001 -fn <fn> -stream
+go run ./cmd/go9p-deviceconnect call -id robot-001 -fn <fn> -stream
 ```
 

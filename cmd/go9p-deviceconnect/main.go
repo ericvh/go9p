@@ -34,9 +34,21 @@ func cmdDiscover(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("discover", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var cf cli9p.ConnFlags
+	// Canonical defaults (override via GO9P_DEVICECONNECT_ADDR or GO9P_ADDR).
+	cf.Addr = strings.TrimSpace(os.Getenv("GO9P_DEVICECONNECT_ADDR"))
+	if cf.Addr == "" {
+		cf.Addr = strings.TrimSpace(os.Getenv("GO9P_ADDR"))
+	}
+	if cf.Addr == "" {
+		cf.Addr = "127.0.0.1:5642"
+	}
 	cf.Register(fs)
 	var root string
-	fs.StringVar(&root, "root", "/devices", "path to devices root (usually /devices)")
+	root = strings.TrimSpace(os.Getenv("GO9P_DEVICECONNECT_ROOT"))
+	if root == "" {
+		root = "/devices"
+	}
+	fs.StringVar(&root, "root", root, "path to devices root (usually /devices)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -63,9 +75,20 @@ func cmdDevices(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("devices", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var cf cli9p.ConnFlags
+	cf.Addr = strings.TrimSpace(os.Getenv("GO9P_DEVICECONNECT_ADDR"))
+	if cf.Addr == "" {
+		cf.Addr = strings.TrimSpace(os.Getenv("GO9P_ADDR"))
+	}
+	if cf.Addr == "" {
+		cf.Addr = "127.0.0.1:5642"
+	}
 	cf.Register(fs)
 	var root string
-	fs.StringVar(&root, "root", "/devices", "path to devices root (usually /devices)")
+	root = strings.TrimSpace(os.Getenv("GO9P_DEVICECONNECT_ROOT"))
+	if root == "" {
+		root = "/devices"
+	}
+	fs.StringVar(&root, "root", root, "path to devices root (usually /devices)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -88,9 +111,20 @@ func cmdMetaStatus(stdout, stderr io.Writer, which string, args []string) int {
 	fs := flag.NewFlagSet(which, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var cf cli9p.ConnFlags
+	cf.Addr = strings.TrimSpace(os.Getenv("GO9P_DEVICECONNECT_ADDR"))
+	if cf.Addr == "" {
+		cf.Addr = strings.TrimSpace(os.Getenv("GO9P_ADDR"))
+	}
+	if cf.Addr == "" {
+		cf.Addr = "127.0.0.1:5642"
+	}
 	cf.Register(fs)
 	var root, id string
-	fs.StringVar(&root, "root", "/devices", "path to devices root (usually /devices)")
+	root = strings.TrimSpace(os.Getenv("GO9P_DEVICECONNECT_ROOT"))
+	if root == "" {
+		root = "/devices"
+	}
+	fs.StringVar(&root, "root", root, "path to devices root (usually /devices)")
 	fs.StringVar(&id, "id", "", "device id")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -119,9 +153,20 @@ func cmdValue(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("value", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var cf cli9p.ConnFlags
+	cf.Addr = strings.TrimSpace(os.Getenv("GO9P_DEVICECONNECT_ADDR"))
+	if cf.Addr == "" {
+		cf.Addr = strings.TrimSpace(os.Getenv("GO9P_ADDR"))
+	}
+	if cf.Addr == "" {
+		cf.Addr = "127.0.0.1:5642"
+	}
 	cf.Register(fs)
 	var root, id, name string
-	fs.StringVar(&root, "root", "/devices", "path to devices root (usually /devices)")
+	root = strings.TrimSpace(os.Getenv("GO9P_DEVICECONNECT_ROOT"))
+	if root == "" {
+		root = "/devices"
+	}
+	fs.StringVar(&root, "root", root, "path to devices root (usually /devices)")
 	fs.StringVar(&id, "id", "", "device id")
 	fs.StringVar(&name, "name", "", "value name")
 	if err := fs.Parse(args); err != nil {
@@ -152,6 +197,13 @@ func cmdCall(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("call", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var cf cli9p.ConnFlags
+	cf.Addr = strings.TrimSpace(os.Getenv("GO9P_DEVICECONNECT_ADDR"))
+	if cf.Addr == "" {
+		cf.Addr = strings.TrimSpace(os.Getenv("GO9P_ADDR"))
+	}
+	if cf.Addr == "" {
+		cf.Addr = "127.0.0.1:5642"
+	}
 	cf.Register(fs)
 
 	var root, id, fn string
@@ -159,7 +211,11 @@ func cmdCall(stdout, stderr io.Writer, args []string) int {
 	var stdin bool
 	var stream bool
 
-	fs.StringVar(&root, "root", "/devices", "path to devices root (usually /devices)")
+	root = strings.TrimSpace(os.Getenv("GO9P_DEVICECONNECT_ROOT"))
+	if root == "" {
+		root = "/devices"
+	}
+	fs.StringVar(&root, "root", root, "path to devices root (usually /devices)")
 	fs.StringVar(&id, "id", "", "device id")
 	fs.StringVar(&fn, "fn", "", "function name")
 	fs.StringVar(&payload, "payload", "", "payload literal (utf-8 text)")

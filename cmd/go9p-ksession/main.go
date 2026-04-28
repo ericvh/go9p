@@ -170,7 +170,11 @@ func main() {
 	fs.SetOutput(os.Stderr)
 	var root string
 	var prompt string
-	fs.StringVar(&root, "root", "", "path to mounted root (e.g. /mnt/9p)")
+	root = strings.TrimSpace(os.Getenv("GO9P_MOUNT"))
+	if root == "" {
+		root = "/mnt/go9p"
+	}
+	fs.StringVar(&root, "root", root, "path to mounted root (e.g. /mnt/go9p)")
 	fs.StringVar(&prompt, "prompt", "go9p(k)> ", "prompt")
 	_ = fs.Parse(os.Args[1:])
 	if root == "" {

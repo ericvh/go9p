@@ -115,7 +115,11 @@ func main() {
 	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	fs.SetOutput(os.Stderr)
 	var root string
-	fs.StringVar(&root, "root", "", "path to mounted deviceconnect root (e.g. /mnt/9p/devices)")
+	root = strings.TrimSpace(os.Getenv("GO9P_DEVICECONNECT_ROOT"))
+	if root == "" {
+		root = "/mnt/go9p/deviceconnect/devices"
+	}
+	fs.StringVar(&root, "root", root, "path to mounted deviceconnect root (e.g. /mnt/go9p/deviceconnect/devices)")
 	_ = fs.Parse(os.Args[1:])
 	if root == "" || fs.NArg() < 1 {
 		usage()

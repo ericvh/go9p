@@ -32,7 +32,7 @@ type Clone struct {
 	clones int
 }
 
-var addr = flag.String("addr", ":5640", "network address")
+var addr = flag.String("addr", ":5643", "network address")
 var debug = flag.Bool("d", false, "print debug messages")
 
 var root *srv.File

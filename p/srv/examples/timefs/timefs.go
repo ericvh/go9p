@@ -21,7 +21,7 @@ type InfTime struct {
 	srv.File
 }
 
-var addr = flag.String("addr", ":5640", "network address")
+var addr = flag.String("addr", ":5644", "network address")
 var debug = flag.Bool("d", false, "print debug messages")
 var debugall = flag.Bool("D", false, "print packets as well as debug messages")
 

@@ -110,7 +110,11 @@ func main() {
 	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	fs.SetOutput(os.Stderr)
 	var netroot string
-	fs.StringVar(&netroot, "netroot", "", "path to mounted /net (e.g. /mnt/9p/net)")
+	netroot = strings.TrimSpace(os.Getenv("GO9P_NETROOT"))
+	if netroot == "" {
+		netroot = "/mnt/go9p/netfs/net"
+	}
+	fs.StringVar(&netroot, "netroot", netroot, "path to mounted /net (e.g. /mnt/go9p/netfs/net)")
 	_ = fs.Parse(os.Args[1:])
 	if netroot == "" || fs.NArg() < 1 {
 		usage()

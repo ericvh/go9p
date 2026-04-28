@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	addr  = flag.String("addr", ":5640", "network address")
+	addr  = flag.String("addr", ":5642", "network address")
 	debug = flag.Bool("d", false, "print debug messages")
 )
 

@@ -22,10 +22,10 @@ the node operations.
 
 ### Common usage
 
-Most servers support `-addr`:
+Most servers support `-addr`, but the examples also default to **canonical ports** near `5640` so you can often run them without flags:
 
 ```bash
-go run ./p/srv/examples/<name> -addr 127.0.0.1:5640
+go run ./p/srv/examples/<name>
 ```
 
 Then use one of the client examples in `p/clnt/examples/` (e.g. `ls`, `read`, `write`) to interact with it.
@@ -44,14 +44,14 @@ Examples:
 
 ```bash
 # netfs: "nc"-like TCP via /net/tcp.
-go run ./cmd/go9p-netfs tcp-dial -addr 127.0.0.1:5640 example.com!80
+go run ./cmd/go9p-netfs tcp-dial example.com!80
 
 # deviceconnect: discover devices and invoke a function.
-go run ./cmd/go9p-deviceconnect discover -addr 127.0.0.1:5640
-go run ./cmd/go9p-deviceconnect call -addr 127.0.0.1:5640 -id robot-001 -fn echo -payload "hello"
+go run ./cmd/go9p-deviceconnect discover
+go run ./cmd/go9p-deviceconnect call -id robot-001 -fn echo -payload "hello"
 
 # clonefs (or any clone semantics): keep the clone id in a session variable.
-go run ./cmd/go9p-session -addr 127.0.0.1:5640
+go run ./cmd/go9p-session
 # then:
 #   clone /clone
 #   cat $last

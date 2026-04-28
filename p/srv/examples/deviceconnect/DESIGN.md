@@ -200,3 +200,13 @@ An obvious next expansion is:
 ```
 
 where `clone` allocates a session and `events/stream` aggregates device events relevant to that session.
+
+### Note on canonical mounts / `/srv`-style indirection (future)
+
+For convenience, it’s attractive to standardize on **canonical ports** (for the userspace 9P server) and
+**canonical mount points** (for the Linux kernel 9p client), so basic tooling works without extra flags.
+
+In a multi-agent setting, it may also be useful to add a Plan 9-like `/srv` equivalent (or a `sessions/` namespace)
+that lets each agent attach to a distinct view of the device mesh (per-agent attach names, per-session filters, etc.).
+This design intentionally keeps the first version simple (single shared `devices/` tree) and leaves `/srv`-style
+indirection as a potential follow-on.

@@ -10,13 +10,13 @@ This repo provides two REPL-style session tools:
 ### go9p-client session
 
 ```bash
-go run ./cmd/go9p-session -addr 127.0.0.1:5640
+go run ./cmd/go9p-session
 ```
 
 ### kernel-mounted session
 
 ```bash
-go run ./cmd/go9p-ksession -root /mnt/9p
+go run ./cmd/go9p-ksession
 ```
 
 ### Common commands

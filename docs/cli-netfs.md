@@ -10,7 +10,7 @@ There are two CLI tools to make it easier to use:
 ### Run the server
 
 ```bash
-go run ./p/srv/examples/netfs -addr 127.0.0.1:5640
+go run ./p/srv/examples/netfs
 ```
 
 ### `tcp-dial` (nc-like)
@@ -18,7 +18,7 @@ go run ./p/srv/examples/netfs -addr 127.0.0.1:5640
 #### go9p-client
 
 ```bash
-go run ./cmd/go9p-netfs tcp-dial -addr 127.0.0.1:5640 example.com!80
+go run ./cmd/go9p-netfs tcp-dial example.com!80
 ```
 
 #### kernel-mounted
@@ -26,7 +26,7 @@ go run ./cmd/go9p-netfs tcp-dial -addr 127.0.0.1:5640 example.com!80
 Assuming you mounted the server at `/mnt/9p` and it provides `/net` there:
 
 ```bash
-go run ./cmd/go9p-knetfs -netroot /mnt/9p/net tcp-dial example.com!80
+go run ./cmd/go9p-knetfs tcp-dial example.com!80
 ```
 
 ### `tcp-alloc` / `tcp-connect`
@@ -34,7 +34,7 @@ go run ./cmd/go9p-knetfs -netroot /mnt/9p/net tcp-dial example.com!80
 The kernel-mounted tool also exposes small, composable steps:
 
 ```bash
-go run ./cmd/go9p-knetfs -netroot /mnt/9p/net tcp-alloc
-go run ./cmd/go9p-knetfs -netroot /mnt/9p/net tcp-connect example.com!80
+go run ./cmd/go9p-knetfs tcp-alloc
+go run ./cmd/go9p-knetfs tcp-connect example.com!80
 ```
 
