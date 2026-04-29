@@ -65,5 +65,38 @@ func TestGo9pDeviceConnect_Discover(t *testing.T) {
 	if !strings.Contains(s, "robot-001") || !strings.Contains(s, "sensor-001") {
 		t.Fatalf("unexpected discover output: %q", s)
 	}
+
+	// Exercise cmdCall end-to-end. The demo backend's echo returns the
+	// payload as-is. Run it twice to confirm the CLI is idempotent across
+	// invocations (each cmdCall mounts and unmounts its own connection).
+	out.Reset()
+	errb.Reset()
+	code = cmdCall(&out, &errb, []string{
+		"-addr", addr,
+		"-id", "robot-001",
+		"-fn", "echo",
+		"-payload", "hello",
+	})
+	if code != 0 {
+		t.Fatalf("call code=%d stderr=%q", code, errb.String())
+	}
+	if got := out.String(); got != "hello" {
+		t.Fatalf("call output=%q want %q", got, "hello")
+	}
+
+	out.Reset()
+	errb.Reset()
+	code = cmdCall(&out, &errb, []string{
+		"-addr", addr,
+		"-id", "robot-001",
+		"-fn", "echo",
+		"-payload", "again",
+	})
+	if code != 0 {
+		t.Fatalf("second call code=%d stderr=%q", code, errb.String())
+	}
+	if got := out.String(); got != "again" {
+		t.Fatalf("second call output=%q want %q", got, "again")
+	}
 }
 

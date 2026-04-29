@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lionkov/go9p/p"
 	"github.com/lionkov/go9p/p/clnt"
@@ -115,7 +116,8 @@ func startDeviceConnectServer(t *testing.T, backend Backend) (addr string, stop 
 	}
 	s := srv.NewFileSrv(fs.root)
 	s.Dotu = true
-	s.Start(s)
+	ds := &dcSrv{Fsrv: s, fs: fs}
+	ds.Start(ds)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -429,6 +431,79 @@ func TestDeviceConnect_FunctionStream(t *testing.T) {
 	}
 	if string(sb) != "abc\n" {
 		t.Fatalf("stream=%q", string(sb))
+	}
+}
+
+// Connection-scoped cleanup: dirs allocated by a connection are reaped when
+// that connection drops.
+func TestDeviceConnect_DisconnectCleansUpCalls(t *testing.T) {
+	backend := &fakeBackend{
+		devices: []Device{
+			{
+				ID:     "robot-001",
+				Type:   "robot",
+				Meta:   "id=robot-001 type=robot",
+				Status: "ok",
+				Functions: []Function{
+					{Name: "echo", About: "Echo.", Schema: "bytes"},
+				},
+			},
+		},
+	}
+	addr, stop := startDeviceConnectServer(t, backend)
+	defer stop()
+
+	// Connection A: allocate several call dirs and never close them.
+	cA, cleanA := mountClient(t, addr)
+	const N = 5
+	var ids []string
+	for i := 0; i < N; i++ {
+		cl, err := cA.FOpen("/devices/by-id/robot-001/functions/echo/clone", p.OREAD)
+		if err != nil {
+			t.Fatalf("clone %d: %v", i, err)
+		}
+		idb, err := io.ReadAll(cl)
+		_ = cl.Close()
+		if err != nil {
+			t.Fatalf("read clone %d: %v", i, err)
+		}
+		ids = append(ids, strings.TrimSpace(string(idb)))
+	}
+
+	// Sanity: every dir is reachable while A is connected.
+	for _, id := range ids {
+		f, err := cA.FOpen("/devices/by-id/robot-001/functions/echo/"+id+"/data", p.OREAD)
+		if err != nil {
+			t.Fatalf("dir %q should be reachable while A is connected: %v", id, err)
+		}
+		_ = f.Close()
+	}
+
+	// Drop A entirely. ConnClosed must reap everything A allocated.
+	cleanA()
+
+	// Give the server a brief moment to run its ConnClosed hook (it runs
+	// inline on the conn's goroutine, but the close itself races against
+	// the client returning from Unmount).
+	deadline := time.Now().Add(2 * time.Second)
+	cB, cleanB := mountClient(t, addr)
+	defer cleanB()
+	for {
+		stillThere := 0
+		for _, id := range ids {
+			f, err := cB.FOpen("/devices/by-id/robot-001/functions/echo/"+id+"/data", p.OREAD)
+			if err == nil {
+				stillThere++
+				_ = f.Close()
+			}
+		}
+		if stillThere == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("after A disconnected, %d/%d dirs still reachable from B — ConnClosed did not reap", stillThere, N)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
