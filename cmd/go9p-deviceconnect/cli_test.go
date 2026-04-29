@@ -41,8 +41,8 @@ func TestGo9pDeviceConnect_Discover(t *testing.T) {
 		}
 	})
 
-	// Wait for listener to be ready (go run compile can take a moment).
-	deadline := time.Now().Add(8 * time.Second)
+	// Wait for listener to be ready; under -race in docker this compile/start can take noticeably longer.
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		c, err := net.DialTimeout("tcp", addr, 150*time.Millisecond)
 		if err == nil {
