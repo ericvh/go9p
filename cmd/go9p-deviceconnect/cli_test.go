@@ -27,7 +27,19 @@ func TestGo9pDeviceConnect_Discover(t *testing.T) {
 	if err := srv.Start(); err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	t.Cleanup(func() { _ = srv.Process.Kill(); _ = srv.Wait() })
+	t.Cleanup(func() {
+		_ = srv.Process.Kill()
+		done := make(chan struct{})
+		go func() {
+			_ = srv.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			// Avoid hanging package tests if go run leaves descendants around.
+		}
+	})
 
 	// Wait for listener to be ready (go run compile can take a moment).
 	deadline := time.Now().Add(8 * time.Second)
