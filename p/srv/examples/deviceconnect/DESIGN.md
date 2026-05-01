@@ -118,6 +118,23 @@ Supported commands:
 
 On failure, `ctl` returns a 9P error (Rerror). This is the “standard” mechanism.
 
+## Call instance lifecycle
+
+Reading `clone` allocates a numbered subdirectory (e.g. `functions/echo/7/`).
+That directory's lifetime is tied to the **9P connection** that allocated
+it: when the connection drops — clean unmount, client crash, or network
+loss — the example's server wrapper (`dcSrv`) reaps every call instance
+attached to that connection via the framework's `ConnClosed` hook.
+
+This mirrors the canonical Plan 9 idiom: `/net/tcp` connections, `/srv`
+posts, and per-process namespaces all evaporate with the connection that
+created them. It also means:
+
+- The CLI does not need to write any explicit "close" command after a call.
+- A client that crashes mid-call doesn't leak — the connection still drops
+  and cleanup still runs.
+- Long-lived servers do not accumulate dead call directories.
+
 ### `devices/by-id/<device-id>/functions/<fn>/<id>/data`
 
 - **read/write**:

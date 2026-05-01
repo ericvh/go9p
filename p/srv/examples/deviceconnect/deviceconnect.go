@@ -334,6 +334,7 @@ type funcCloneFile struct {
 	backend  Backend
 	deviceID string
 	fn       string
+	fs       *DCFS // back-pointer for per-conn registration of allocated dirs
 }
 
 func (f *funcCloneFile) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) {
@@ -380,6 +381,13 @@ func (f *funcCloneFile) Read(fid *srv.FFid, buf []byte, offset uint64) (int, err
 		instDir.Remove()
 		return 0, &p.Error{Err: "buffer too small", Errornum: 0}
 	}
+	// Register the dir against the connection that allocated it. When that
+	// connection drops, ConnClosed reaps anything still attached. This is the
+	// canonical 9P lifecycle (cf. /net/tcp, where connection state vanishes
+	// with the connection that created it).
+	if f.fs != nil && fid != nil && fid.Fid != nil {
+		f.fs.registerCallDir(fid.Fid.Fconn, instDir)
+	}
 	copy(buf, out)
 	return len(out), nil
 }
@@ -404,6 +412,51 @@ type DCFS struct {
 
 	// Per-device-value event cancels (best-effort cleanup on refresh).
 	valueEventCancels map[string]context.CancelFunc
+
+	// Per-connection registry of call instance dirs allocated via clone.
+	// On ConnClosed we remove everything still attached to the dropped
+	// connection, so a client crash or unmount auto-reaps its workspace.
+	connMu   sync.Mutex
+	connDirs map[*srv.Conn][]*srv.File
+}
+
+// registerCallDir associates a freshly-allocated call instance dir with the
+// 9P connection that allocated it, so it can be reaped on disconnect.
+func (fs *DCFS) registerCallDir(c *srv.Conn, dir *srv.File) {
+	if c == nil || dir == nil {
+		return
+	}
+	fs.connMu.Lock()
+	fs.connDirs[c] = append(fs.connDirs[c], dir)
+	fs.connMu.Unlock()
+}
+
+// releaseConn removes every call instance dir registered to the given
+// connection. Safe to call multiple times: srv.File.Remove is idempotent
+// via the Fremoved flag, so a dir torn down by another path (e.g. a
+// refresh that rebuilt its parent device) is skipped silently.
+func (fs *DCFS) releaseConn(c *srv.Conn) {
+	fs.connMu.Lock()
+	dirs := fs.connDirs[c]
+	delete(fs.connDirs, c)
+	fs.connMu.Unlock()
+	for _, d := range dirs {
+		d.Remove()
+	}
+}
+
+// dcSrv wraps srv.Fsrv so the deviceconnect example can hook 9P connection
+// lifecycle events. The default srv.Fsrv has no opinion on connection close;
+// here we use it to run releaseConn for the closing connection.
+type dcSrv struct {
+	*srv.Fsrv
+	fs *DCFS
+}
+
+func (s *dcSrv) ConnOpened(*srv.Conn) {}
+
+func (s *dcSrv) ConnClosed(c *srv.Conn) {
+	s.fs.releaseConn(c)
 }
 
 func buildDeviceConnectFS(backend Backend) (*DCFS, error) {
@@ -413,6 +466,7 @@ func buildDeviceConnectFS(backend Backend) (*DCFS, error) {
 		deviceDirs:        make(map[string]*srv.File),
 		eventCancels:      make(map[string]context.CancelFunc),
 		valueEventCancels: make(map[string]context.CancelFunc),
+		connDirs:          make(map[*srv.Conn][]*srv.File),
 	}
 
 	fs.root = new(srv.File)
@@ -671,6 +725,7 @@ func (fs *DCFS) addDeviceLocked(d Device) error {
 			backend:  fs.backend,
 			deviceID: d.ID,
 			fn:       fn.Name,
+			fs:       fs,
 		}
 		if err := cl.Add(fnDir, "clone", fs.user, nil, 0o444, cl); err != nil {
 			return err
@@ -789,9 +844,10 @@ func main() {
 	if *debug {
 		s.Debuglevel = 1
 	}
-	s.Start(s)
+	ds := &dcSrv{Fsrv: s, fs: fs}
+	ds.Start(ds)
 
-	if err := s.StartNetListener("tcp", *addr); err != nil {
+	if err := ds.StartNetListener("tcp", *addr); err != nil {
 		log.Fatalf("listen: %v", err)
 	}
 }
