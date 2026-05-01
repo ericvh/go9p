@@ -77,8 +77,16 @@ func cmdCall(root, id, fn string, req []byte, stream bool) {
 	errPath := filepath.Join(callDir, "error")
 	streamPath := filepath.Join(callDir, "stream")
 
+	// Keep ctl open until after reading response/stream. The server GC's the
+	// session directory when the last ctl reference is closed.
+	ctlf, err := os.OpenFile(ctlPath, os.O_WRONLY, 0)
+	if err != nil {
+		dief("open ctl: %v", err)
+	}
+	defer ctlf.Close()
+
 	// Reset per-call buffers so writes don't rely on truncate semantics.
-	_ = kfs.WriteAll(ctlPath, []byte("reset\n"))
+	_, _ = ctlf.Write([]byte("reset\n"))
 
 	if len(req) != 0 {
 		if err := kfs.WriteAll(dataPath, req); err != nil {
@@ -90,7 +98,7 @@ func cmdCall(root, id, fn string, req []byte, stream bool) {
 	if stream {
 		ctlCmd = []byte("stream\n")
 	}
-	if err := kfs.WriteAll(ctlPath, ctlCmd); err != nil {
+	if _, err := ctlf.Write(ctlCmd); err != nil {
 		if eb, e2 := kfs.ReadAll(errPath); e2 == nil {
 			msg := strings.TrimSpace(string(eb))
 			if msg != "" {

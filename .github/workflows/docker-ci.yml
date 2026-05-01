@@ -58,7 +58,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Run unit tests for example filesystems
-        run: go test ./p/srv/examples/...
+        run: go test -v ./p/srv/examples/...
 
   tlsramfs-e2e:
     name: tlsramfs userspace e2e
@@ -71,7 +71,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Run tlsramfs TLS client CRUD
-        run: go test -count=1 ./p/srv/examples/tlsramfs -run TestTLSRamfs_TLSClientCRUD
+        run: go test -v -count=1 ./p/srv/examples/tlsramfs -run TestTLSRamfs_TLSClientCRUD
 
   kernel9p-qemu:
     # arm64-only kernel-client testing using v9fs/docker methodology.

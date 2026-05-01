@@ -23,29 +23,43 @@ mount_and_run() {
   echo "[guest] mounting kernel 9p client via tcp ${SERVER_ADDR}:${SERVER_PORT} (fs=${FS} version=${version}) -> ${mnt}"
   opts="trans=tcp,version=${version},msize=262144,port=${SERVER_PORT},uname=${UNAME},uid=${UID_OPT},gid=${GID_OPT}"
   # Some synthetic servers don't model full Unix permission semantics; permit access for CLI checks.
-  if [ "${FS}" = "deviceconnect" ]; then
+  if [ "${FS}" = "deviceconnect" ] || [ "${FS}" = "clonefs" ] || [ "${FS}" = "netfs" ]; then
     opts="${opts},access=any"
   fi
+  echo "[guest] mount -t 9p -o \"${opts}\" \"${SERVER_ADDR}\" \"${mnt}\""
   mount -t 9p -o "${opts}" "${SERVER_ADDR}" "${mnt}"
 
   echo "[guest] running kernel9p-e2e against mount ${mnt} (fs=${FS} server=${server_mode})"
+  echo "[guest] KERNEL9P_FS=\"${FS}\" KERNEL9P_SERVER=\"${server_mode}\" KERNEL9P_TCP_ADDR=\"${SERVER_ADDR}\" KERNEL9P_TCP_PORT=\"${SERVER_PORT}\" KERNEL9P_MOUNT=\"${mnt}\" /opt/v9fs/kernel9p-e2e"
   KERNEL9P_FS="${FS}" KERNEL9P_SERVER="${server_mode}" KERNEL9P_TCP_ADDR="${SERVER_ADDR}" KERNEL9P_TCP_PORT="${SERVER_PORT}" KERNEL9P_MOUNT="${mnt}" /opt/v9fs/kernel9p-e2e
 
   # Also exercise the "kernel-mounted" CLI tools against the mounted tree.
   case "${FS}" in
     netfs)
       echo "[guest] running kernel-mounted CLI checks (netfs)"
+      echo "[guest] /opt/v9fs/go9p-knetfs -netroot \"${mnt}/net\" tcp-alloc"
       /opt/v9fs/go9p-knetfs -netroot "${mnt}/net" tcp-alloc >/dev/null
+      echo "[guest] netfs: NOTE: session GC is checked by kernel9p-e2e before unmount"
+      ;;
+    clonefs)
+      echo "[guest] running kernel-mounted CLI checks (clonefs)"
+      echo "[guest] /opt/v9fs/go9p-ksession clone-shell -root \"${mnt}\" -clone /clone -session '{clone_dir}' -ctl '{clone_dir}/{id}' -chdir '{clone_dir}' -cmd 'exit 0'"
+      /opt/v9fs/go9p-ksession clone-shell -root "${mnt}" -clone /clone \
+        -session '{clone_dir}' -ctl '{clone_dir}/{id}' -chdir '{clone_dir}' -cmd 'exit 0' >/dev/null
       ;;
     deviceconnect)
       echo "[guest] running kernel-mounted CLI checks (deviceconnect)"
+      echo "[guest] /opt/v9fs/go9p-kdeviceconnect -root \"${mnt}/devices\" discover"
       /opt/v9fs/go9p-kdeviceconnect -root "${mnt}/devices" discover >/dev/null
+      echo "[guest] /opt/v9fs/go9p-kdeviceconnect -root \"${mnt}/devices\" meta -id robot-001"
       /opt/v9fs/go9p-kdeviceconnect -root "${mnt}/devices" meta -id robot-001 >/dev/null
+      echo "[guest] /opt/v9fs/go9p-kdeviceconnect -root \"${mnt}/devices\" status -id robot-001"
       /opt/v9fs/go9p-kdeviceconnect -root "${mnt}/devices" status -id robot-001 >/dev/null
+      echo "[guest] deviceconnect: NOTE: session GC is checked by kernel9p-e2e before unmount"
       ;;
   esac
 
-  echo "[guest] unmounting ${mnt}"
+  echo "[guest] umount \"${mnt}\""
   umount "${mnt}"
 }
 

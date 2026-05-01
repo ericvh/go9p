@@ -42,27 +42,47 @@ func connect(netroot, id, target string) (string, error) {
 		}
 	}
 	ctl := filepath.Join(netroot, "tcp", id, "ctl")
-	if err := kfs.WriteAll(ctl, []byte("connect "+target+"\n")); err != nil {
+	// Keep ctl open until the caller is done; the server GC's the session dir on
+	// last ctl close.
+	f, err := os.OpenFile(ctl, os.O_WRONLY, 0)
+	if err != nil {
 		return "", err
 	}
+	if _, err := f.Write([]byte("connect " + target + "\n")); err != nil {
+		_ = f.Close()
+		return "", err
+	}
+	_ = f.Close()
 	return id, nil
 }
 
 func dial(netroot, target string) {
-	id, err := connect(netroot, "", target)
+	id, err := alloc(netroot)
 	if err != nil {
-		dief("connect: %v", err)
+		dief("alloc: %v", err)
 	}
 	ctl := filepath.Join(netroot, "tcp", id, "ctl")
 	data := filepath.Join(netroot, "tcp", id, "data")
 
+	// Keep ctl open until we're done with this conversation.
+	ctlf, err := os.OpenFile(ctl, os.O_WRONLY, 0)
+	if err != nil {
+		dief("open ctl: %v", err)
+	}
+	defer ctlf.Close()
+	if _, err := ctlf.Write([]byte("connect " + target + "\n")); err != nil {
+		dief("connect: %v", err)
+	}
+
 	rf, err := os.OpenFile(data, os.O_RDONLY, 0)
 	if err != nil {
+		_ = ctlf.Close()
 		dief("open data for read: %v", err)
 	}
 	wf, err := os.OpenFile(data, os.O_WRONLY, 0)
 	if err != nil {
 		_ = rf.Close()
+		_ = ctlf.Close()
 		dief("open data for write: %v", err)
 	}
 
@@ -84,7 +104,7 @@ func dial(netroot, target string) {
 
 	<-ctx.Done()
 	wg.Wait()
-	_ = kfs.WriteAll(ctl, []byte("close\n"))
+	_, _ = ctlf.Write([]byte("close\n"))
 }
 
 func kfsTrapInterrupt(cancel func()) {

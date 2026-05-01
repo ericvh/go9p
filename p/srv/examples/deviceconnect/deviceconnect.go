@@ -236,6 +236,12 @@ type callCtlFile struct {
 	deviceID string
 	fn       string
 	inst     *callInstance
+
+	mu      sync.Mutex
+	opened  map[*srv.Fid]bool
+	opens   int
+	removed bool
+	dir     *srv.File
 }
 
 func (f *callCtlFile) Write(fid *srv.FFid, data []byte, offset uint64) (int, error) {
@@ -321,6 +327,43 @@ func (f *callCtlFile) Write(fid *srv.FFid, data []byte, offset uint64) (int, err
 	}
 }
 
+func (f *callCtlFile) Open(fid *srv.FFid, mode uint8) error {
+	f.mu.Lock()
+	if f.opened == nil {
+		f.opened = make(map[*srv.Fid]bool, 1)
+	}
+	f.opened[fid.Fid] = true
+	f.opens++
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *callCtlFile) Clunk(fid *srv.FFid) error {
+	f.mu.Lock()
+	// Only count opens for fids that were actually opened. Some clients (notably
+	// the Linux kernel 9p client) may walk+clunk fids without a preceding open.
+	if f.opened != nil && f.opened[fid.Fid] {
+		delete(f.opened, fid.Fid)
+	} else {
+		f.mu.Unlock()
+		return nil
+	}
+	if f.opens > 0 {
+		f.opens--
+	}
+	doRemove := f.opens == 0 && !f.removed
+	if doRemove {
+		f.removed = true
+	}
+	dir := f.dir
+	f.mu.Unlock()
+
+	if doRemove && dir != nil {
+		dir.Remove()
+	}
+	return nil
+}
+
 type funcCallState struct {
 	mu   sync.Mutex
 	next int
@@ -353,6 +396,7 @@ func (f *funcCloneFile) Read(fid *srv.FFid, buf []byte, offset uint64) (int, err
 
 	inst := &callInstance{}
 	ctl := &callCtlFile{backend: f.backend, deviceID: f.deviceID, fn: f.fn, inst: inst}
+	ctl.dir = instDir
 	if err := ctl.Add(instDir, "ctl", f.user, nil, 0o666, ctl); err != nil {
 		instDir.Remove()
 		return 0, err

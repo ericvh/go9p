@@ -253,6 +253,7 @@ func kernelCloneFSSmoke(root string) {
 
 func kernelNetFSSmoke(root string) {
 	netdir := filepath.Join(root, "net")
+	fmt.Println("INFO: netfs: checking /net exists")
 	st, err := os.Stat(netdir)
 	must(err, "stat /net")
 	if !st.IsDir() {
@@ -260,6 +261,7 @@ func kernelNetFSSmoke(root string) {
 	}
 
 	// Read a couple of representative files (mostly read-only surfaces).
+	fmt.Println("INFO: netfs: reading ipselftab + ether0/addr")
 	_ = readAll(filepath.Join(netdir, "ipselftab"))
 	mac := strings.TrimSpace(string(readAll(filepath.Join(netdir, "ether0", "addr"))))
 	if len(mac) != 12 {
@@ -267,25 +269,102 @@ func kernelNetFSSmoke(root string) {
 	}
 
 	// Exercise the tcp clone pattern: reading clone should allocate a conversation.
+	fmt.Println("INFO: netfs: allocating tcp conversation via /net/tcp/clone")
 	id := strings.TrimSpace(string(readAll(filepath.Join(netdir, "tcp", "clone"))))
 	if id == "" {
 		must(fmt.Errorf("empty tcp clone id"), "tcp clone id")
 	}
+	fmt.Printf("INFO: netfs: allocated tcp id=%s\n", id)
 	_ = readAll(filepath.Join(netdir, "tcp", id, "status"))
+
+	// Verify the session directory is GC'ed when the last reference to ctl is closed.
+	// Note: the directory may be created lazily, so we open ctl first (which should
+	// make the session materialize), then close it and require the dir to be gone.
+	fmt.Println("INFO: netfs: GC check (open+close ctl removes /net/tcp/<id>)")
+	ctlPath := filepath.Join(netdir, "tcp", id, "ctl")
+	fmt.Printf("INFO: netfs: opening ctl path=%s\n", ctlPath)
+	f, err := os.OpenFile(ctlPath, os.O_RDWR, 0)
+	openMode := "RDWR"
+	if err != nil {
+		// Fall back for servers/mounts that don't allow RDWR.
+		f, err = os.OpenFile(ctlPath, os.O_WRONLY, 0)
+		openMode = "WRONLY"
+	}
+	if err != nil {
+		// Some mounts may deny write opens; read-only is enough to prove that
+		// closing the last ctl reference triggers GC.
+		f, err = os.OpenFile(ctlPath, os.O_RDONLY, 0)
+		openMode = "RDONLY"
+	}
+	must(err, "open ctl")
+	fmt.Printf("INFO: netfs: opened ctl mode=%s; now closing\n", openMode)
+	must(f.Close(), "close ctl")
+
+	// Poll briefly: kernel attribute caching can delay visibility of removals.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		_, err = os.Stat(filepath.Join(netdir, "tcp", id))
+		if errors.Is(err, unix.ENOENT) {
+			fmt.Printf("INFO: netfs: stat /net/tcp/%s -> ENOENT (GC confirmed)\n", id)
+			break
+		}
+		if time.Now().After(deadline) {
+			if err == nil {
+				must(fmt.Errorf("expected ENOENT after ctl close"), "tcp session GC after ctl close")
+			}
+			must(err, "tcp session GC stat")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func kernelDeviceConnectSmoke(root string) {
 	dev := filepath.Join(root, "devices")
+	fmt.Println("INFO: deviceconnect: checking /devices exists")
 	st, err := os.Stat(dev)
 	must(err, "stat /devices")
 	if !st.IsDir() {
 		must(fmt.Errorf("/devices not a directory"), "devices is dir")
 	}
+	fmt.Println("INFO: deviceconnect: reading /devices/discover")
 	disc := strings.TrimSpace(string(readAll(filepath.Join(dev, "discover"))))
 	if disc == "" {
 		// The backend in the example always seeds devices; treat empty as failure.
 		must(fmt.Errorf("empty discover"), "deviceconnect discover non-empty")
 	}
+
+	// Validate GC of per-call sessions: allocate a call id by reading clone,
+	// then close ctl and ensure the call dir is removed before unmount.
+	fmt.Println("INFO: deviceconnect: GC check (close last ctl ref removes call dir)")
+	// Use the seeded example device/function in deviceconnect example server.
+	clonePath := filepath.Join(dev, "by-id", "robot-001", "functions", "echo", "clone")
+	callID := strings.TrimSpace(string(readAll(clonePath)))
+	if callID == "" {
+		must(fmt.Errorf("empty call clone id"), "deviceconnect call clone id")
+	}
+	callDir := filepath.Join(dev, "by-id", "robot-001", "functions", "echo", callID)
+	ctlPath := filepath.Join(callDir, "ctl")
+	fmt.Printf("INFO: deviceconnect: opening call ctl path=%s\n", ctlPath)
+	f, err := os.OpenFile(ctlPath, os.O_RDWR, 0)
+	openMode := "RDWR"
+	if err != nil {
+		f, err = os.OpenFile(ctlPath, os.O_WRONLY, 0)
+		openMode = "WRONLY"
+	}
+	if err != nil {
+		// Some mounts may deny write opens; read-only is enough to prove that
+		// closing the last ctl reference triggers GC.
+		f, err = os.OpenFile(ctlPath, os.O_RDONLY, 0)
+		openMode = "RDONLY"
+	}
+	must(err, "open call ctl")
+	fmt.Printf("INFO: deviceconnect: opened call ctl mode=%s; now closing\n", openMode)
+	must(f.Close(), "close call ctl")
+	_, err = os.Stat(callDir)
+	if err == nil {
+		must(fmt.Errorf("expected ENOENT after ctl close"), "deviceconnect call dir GC after ctl close")
+	}
+	mustIs(err, unix.ENOENT, "deviceconnect call dir GC errno")
 }
 
 func dial9P(addr string, timeout time.Duration) (net.Conn, error) {

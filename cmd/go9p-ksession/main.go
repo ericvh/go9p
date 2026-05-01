@@ -3,10 +3,12 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -15,6 +17,122 @@ import (
 func dief(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "error: "+format+"\n", args...)
 	os.Exit(2)
+}
+
+func expandUnderRoot(root, p string) string {
+	if strings.HasPrefix(p, "/") {
+		return filepath.Clean(filepath.Join(root, p))
+	}
+	return filepath.Clean(filepath.Join(root, p))
+}
+
+func applyCloneTemplate(tmpl, root, clonePath, cloneDir, id string) string {
+	// Template may use:
+	//   {root}      - cleaned root
+	//   {clone}     - full clone path (under root)
+	//   {clone_dir} - directory containing clone
+	//   {id}        - id read from clone
+	out := tmpl
+	out = strings.ReplaceAll(out, "{root}", root)
+	out = strings.ReplaceAll(out, "{clone}", clonePath)
+	out = strings.ReplaceAll(out, "{clone_dir}", cloneDir)
+	out = strings.ReplaceAll(out, "{id}", id)
+	return out
+}
+
+func runCloneShell(root, clonePath, shell, cmd, sessionTmpl, ctlTmpl, chdirTmpl string) int {
+	if clonePath == "" {
+		fmt.Fprintf(os.Stderr, "error: missing -clone\n")
+		return 2
+	}
+	root = filepath.Clean(root)
+	clonePath = expandUnderRoot(root, clonePath)
+	cloneDir := filepath.Dir(clonePath)
+
+	clonef, err := os.Open(clonePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: open clone: %v\n", err)
+		return 2
+	}
+	defer clonef.Close()
+
+	idLine, err := bufio.NewReader(clonef).ReadString('\n')
+	if err != nil && err != io.EOF {
+		fmt.Fprintf(os.Stderr, "error: read clone: %v\n", err)
+		return 2
+	}
+	id := strings.TrimSpace(idLine)
+	if id == "" {
+		fmt.Fprintf(os.Stderr, "error: clone returned empty id\n")
+		return 2
+	}
+
+	if sessionTmpl == "" {
+		sessionTmpl = "{clone_dir}/{id}"
+	}
+	if ctlTmpl == "" {
+		ctlTmpl = "{session}/ctl"
+	}
+	if chdirTmpl == "" {
+		chdirTmpl = "{session}"
+	}
+	sessDir := applyCloneTemplate(sessionTmpl, root, clonePath, cloneDir, id)
+	// Allow ctl/chdir templates to refer to computed session via {session}.
+	ctlPath := strings.ReplaceAll(ctlTmpl, "{session}", sessDir)
+	ctlPath = applyCloneTemplate(ctlPath, root, clonePath, cloneDir, id)
+	chdirPath := strings.ReplaceAll(chdirTmpl, "{session}", sessDir)
+	chdirPath = applyCloneTemplate(chdirPath, root, clonePath, cloneDir, id)
+
+	// Hold ctl open for the lifetime of the subshell; servers GC on last ctl close.
+	//
+	// Prefer O_RDWR since ctl is typically both readable (status) and writable
+	// (commands). Fall back for kernel mount / synthetic permission quirks.
+	ctlf, err := os.OpenFile(ctlPath, os.O_RDWR, 0)
+	if err != nil {
+		ctlf, err = os.OpenFile(ctlPath, os.O_WRONLY, 0)
+	}
+	if err != nil {
+		ctlf, err = os.OpenFile(ctlPath, os.O_RDONLY, 0)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: open ctl: %v\n", err)
+			return 2
+		}
+	}
+	defer ctlf.Close()
+
+	if err := os.Chdir(chdirPath); err != nil {
+		fmt.Fprintf(os.Stderr, "error: chdir session: %v\n", err)
+		return 2
+	}
+
+	if shell == "" {
+		shell = strings.TrimSpace(os.Getenv("SHELL"))
+	}
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+
+	args := []string{}
+	if cmd != "" {
+		args = append(args, "-c", cmd)
+	} else {
+		// Interactive by default.
+		args = append(args, "-i")
+	}
+	c := exec.Command(shell, args...)
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	c.Env = os.Environ()
+	if err := c.Run(); err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(os.Stderr, "error: exec shell: %v\n", err)
+		return 2
+	}
+	return 0
 }
 
 type session struct {
@@ -166,6 +284,33 @@ func (s *session) cmd(line string) (quit bool) {
 }
 
 func main() {
+	// Subcommand: clone-shell
+	// Usage: go9p-ksession clone-shell -root /mnt/go9p -clone /netfs/net/tcp/clone [-shell /bin/bash] [-cmd '...']
+	if len(os.Args) > 1 && os.Args[1] == "clone-shell" {
+		fs := flag.NewFlagSet(os.Args[0]+" clone-shell", flag.ExitOnError)
+		fs.SetOutput(os.Stderr)
+		var root string
+		var clonePath string
+		var shell string
+		var cmd string
+		var sessionTmpl string
+		var ctlTmpl string
+		var chdirTmpl string
+		root = strings.TrimSpace(os.Getenv("GO9P_MOUNT"))
+		if root == "" {
+			root = "/mnt/go9p"
+		}
+		fs.StringVar(&root, "root", root, "path to mounted root (e.g. /mnt/go9p)")
+		fs.StringVar(&clonePath, "clone", "", "clone file path under -root (e.g. /netfs/net/tcp/clone)")
+		fs.StringVar(&shell, "shell", "", "shell path (default: $SHELL, fallback /bin/sh)")
+		fs.StringVar(&cmd, "cmd", "", "run a command via shell -c instead of interactive subshell (useful for tests)")
+		fs.StringVar(&sessionTmpl, "session", "", "session dir template (default: {clone_dir}/{id})")
+		fs.StringVar(&ctlTmpl, "ctl", "", "ctl path template (default: {session}/ctl). Use e.g. {clone_dir}/{id} for clonefs.")
+		fs.StringVar(&chdirTmpl, "chdir", "", "chdir template (default: {session}). Use e.g. {clone_dir} for clonefs.")
+		_ = fs.Parse(os.Args[2:])
+		os.Exit(runCloneShell(root, clonePath, shell, cmd, sessionTmpl, ctlTmpl, chdirTmpl))
+	}
+
 	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	fs.SetOutput(os.Stderr)
 	var root string

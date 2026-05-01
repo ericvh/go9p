@@ -242,6 +242,12 @@ type TCPConv struct {
 type TCPCTL struct {
 	srv.File
 	conv *TCPConv
+
+	mu      sync.Mutex
+	opened  map[*srv.Fid]bool
+	opens   int
+	removed bool
+	dir     *srv.File
 }
 
 type TCPData struct {
@@ -333,6 +339,7 @@ func (f *TCPClone) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) {
 
 	ctl := new(TCPCTL)
 	ctl.conv = conv
+	ctl.dir = dir
 	if err := ctl.Add(dir, "ctl", user, nil, 0o666, ctl); err != nil {
 		return 0, err
 	}
@@ -390,6 +397,47 @@ func (f *TCPCTL) Write(fid *srv.FFid, data []byte, offset uint64) (int, error) {
 	default:
 		return 0, fmt.Errorf("unknown ctl command %q", fields[0])
 	}
+}
+
+func (f *TCPCTL) Open(fid *srv.FFid, mode uint8) error {
+	f.mu.Lock()
+	if f.opened == nil {
+		f.opened = make(map[*srv.Fid]bool, 1)
+	}
+	f.opened[fid.Fid] = true
+	f.opens++
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *TCPCTL) Clunk(fid *srv.FFid) error {
+	f.mu.Lock()
+	// Only count opens for fids that were actually opened. Some clients (notably
+	// the Linux kernel 9p client) may walk+clunk fids without a preceding open.
+	if f.opened != nil && f.opened[fid.Fid] {
+		delete(f.opened, fid.Fid)
+	} else {
+		f.mu.Unlock()
+		return nil
+	}
+	if f.opens > 0 {
+		f.opens--
+	}
+	doRemove := f.opens == 0 && !f.removed
+	if doRemove {
+		f.removed = true
+	}
+	dir := f.dir
+	conv := f.conv
+	f.mu.Unlock()
+
+	if doRemove {
+		_ = conv.close()
+		if dir != nil {
+			dir.Remove()
+		}
+	}
+	return nil
 }
 
 func (f *TCPData) Read(fid *srv.FFid, buf []byte, offset uint64) (int, error) {

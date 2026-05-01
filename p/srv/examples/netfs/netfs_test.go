@@ -148,6 +148,39 @@ func TestNetFS_TCPConnectAndEcho(t *testing.T) {
 	}
 }
 
+func TestNetFS_TCPSession_GCedOnCtlClose(t *testing.T) {
+	srvAddr, stop := startNetFSServer(t)
+	defer stop()
+
+	c, cleanup := mountNetFSClient(t, srvAddr)
+	defer cleanup()
+
+	clone, err := c.FOpen("/net/tcp/clone", p.OREAD)
+	if err != nil {
+		t.Fatalf("open clone: %v", err)
+	}
+	idb, err := io.ReadAll(clone)
+	_ = clone.Close()
+	if err != nil {
+		t.Fatalf("read clone: %v", err)
+	}
+	id := strings.TrimSpace(string(idb))
+	if id == "" {
+		t.Fatalf("empty clone id")
+	}
+
+	ctl, err := c.FOpen("/net/tcp/"+id+"/ctl", p.OWRITE)
+	if err != nil {
+		t.Fatalf("open ctl: %v", err)
+	}
+	_ = ctl.Close()
+
+	// After last ctl close, session directory should be gone.
+	if _, err := c.FStat("/net/tcp/" + id); err == nil {
+		t.Fatalf("expected /net/tcp/%s to be removed after ctl close", id)
+	}
+}
+
 func TestNetFS_NDB_Limit(t *testing.T) {
 	srvAddr, stop := startNetFSServer(t)
 	defer stop()

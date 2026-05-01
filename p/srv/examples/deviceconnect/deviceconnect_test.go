@@ -273,6 +273,12 @@ func TestDeviceConnect_InvokeAndResult(t *testing.T) {
 		t.Fatalf("empty clone id")
 	}
 
+	ctl, err := c.FOpen("/devices/by-id/robot-001/functions/echo/"+id+"/ctl", p.OWRITE)
+	if err != nil {
+		t.Fatalf("open ctl: %v", err)
+	}
+	defer ctl.Close()
+
 	dataf, err := c.FOpen("/devices/by-id/robot-001/functions/echo/"+id+"/data", p.ORDWR)
 	if err != nil {
 		t.Fatalf("open data: %v", err)
@@ -282,14 +288,9 @@ func TestDeviceConnect_InvokeAndResult(t *testing.T) {
 	}
 	_ = dataf.Close()
 
-	ctl, err := c.FOpen("/devices/by-id/robot-001/functions/echo/"+id+"/ctl", p.OWRITE)
-	if err != nil {
-		t.Fatalf("open ctl: %v", err)
-	}
 	if _, err := ctl.Write([]byte("call\n")); err != nil {
 		t.Fatalf("ctl call: %v", err)
 	}
-	_ = ctl.Close()
 
 	dataf, err = c.FOpen("/devices/by-id/robot-001/functions/echo/"+id+"/data", p.OREAD)
 	if err != nil {
@@ -346,8 +347,8 @@ func TestDeviceConnect_FunctionErrorFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open ctl: %v", err)
 	}
+	defer ctl.Close()
 	_, err = ctl.Write([]byte("call\n"))
-	_ = ctl.Close()
 	if err == nil {
 		t.Fatalf("expected ctl call to fail")
 	}
@@ -412,11 +413,10 @@ func TestDeviceConnect_FunctionStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open ctl: %v", err)
 	}
+	defer ctl.Close()
 	if _, err := ctl.Write([]byte("stream\n")); err != nil {
-		_ = ctl.Close()
 		t.Fatalf("ctl stream: %v", err)
 	}
-	_ = ctl.Close()
 
 	sf, err := c.FOpen("/devices/by-id/robot-001/functions/streamy/"+id+"/stream", p.OREAD)
 	if err != nil {
@@ -514,5 +514,51 @@ func TestDeviceConnect_ValueEventsReplay(t *testing.T) {
 	s := string(got)
 	if !strings.Contains(s, "value.temp") || !strings.Contains(s, "21.0") {
 		t.Fatalf("replay=%q", s)
+	}
+}
+
+func TestDeviceConnect_FunctionSession_GCedOnCtlClose(t *testing.T) {
+	backend := &fakeBackend{
+		devices: []Device{
+			{
+				ID:     "robot-001",
+				Type:   "robot",
+				Meta:   "id=robot-001 type=robot",
+				Status: "ok",
+				Functions: []Function{
+					{Name: "echo", About: "Echo.", Schema: "bytes"},
+				},
+			},
+		},
+	}
+	addr, stop := startDeviceConnectServer(t, backend)
+	defer stop()
+
+	c, cleanup := mountClient(t, addr)
+	defer cleanup()
+
+	cl, err := c.FOpen("/devices/by-id/robot-001/functions/echo/clone", p.OREAD)
+	if err != nil {
+		t.Fatalf("open clone: %v", err)
+	}
+	idb, err := io.ReadAll(cl)
+	_ = cl.Close()
+	if err != nil {
+		t.Fatalf("read clone: %v", err)
+	}
+	id := strings.TrimSpace(string(idb))
+	if id == "" {
+		t.Fatalf("empty clone id")
+	}
+
+	ctl, err := c.FOpen("/devices/by-id/robot-001/functions/echo/"+id+"/ctl", p.OWRITE)
+	if err != nil {
+		t.Fatalf("open ctl: %v", err)
+	}
+	_ = ctl.Close()
+
+	// After last ctl close, session directory should be gone.
+	if _, err := c.FStat("/devices/by-id/robot-001/functions/echo/" + id); err == nil {
+		t.Fatalf("expected function call dir %q to be removed after ctl close", id)
 	}
 }

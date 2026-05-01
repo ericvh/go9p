@@ -67,8 +67,15 @@ func cmdTCPDial(args []string) {
 	ctl := fmt.Sprintf("%s/tcp/%s/ctl", netRoot, convID)
 	data := fmt.Sprintf("%s/tcp/%s/data", netRoot, convID)
 
-	// connect via ctl
-	if err := cli9p.WriteAll(c, ctl, []byte("connect "+target+"\n"), true); err != nil {
+	// Keep ctl open until we're done with this conversation. The server GC's the
+	// session directory when the last ctl reference is closed.
+	ctlf, err := c.FOpen(ctl, p.OWRITE)
+	if err != nil {
+		dief("open ctl: %v", err)
+	}
+	defer ctlf.Close()
+
+	if _, err := ctlf.Write([]byte("connect " + target + "\n")); err != nil {
 		dief("connect: %v", err)
 	}
 
@@ -104,7 +111,7 @@ func cmdTCPDial(args []string) {
 
 	<-ctx.Done()
 	wg.Wait()
-	_ = cli9p.WriteAll(c, ctl, []byte("close\n"), true)
+	_, _ = ctlf.Write([]byte("close\n"))
 }
 
 type fileReader struct{ f *clnt.File }

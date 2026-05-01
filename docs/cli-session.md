@@ -19,6 +19,25 @@ go run ./cmd/go9p-session
 go run ./cmd/go9p-ksession
 ```
 
+### kernel-mounted clone subshell
+
+If your filesystem uses clone semantics that create a per-session directory with a `ctl` file,
+you can launch a subshell that **keeps `ctl` open for the lifetime of the shell**.
+When the subshell exits, `ctl` is closed and the server can garbage collect the session directory.
+
+```bash
+# Example: netfs conversation subshell
+go run ./cmd/go9p-ksession clone-shell -root /mnt/go9p -clone /netfs/net/tcp/clone
+```
+
+For filesystems where `clone` creates a file directly (like the `clonefs` example),
+you can adapt paths with templates:
+
+```bash
+go run ./cmd/go9p-ksession clone-shell -root /mnt/go9p -clone /clone \
+  -session '{clone_dir}' -ctl '{clone_dir}/{id}' -chdir '{clone_dir}'
+```
+
 ### Common commands
 
 - `clone <path>`: reads a clone file and stores the returned id into `$last`

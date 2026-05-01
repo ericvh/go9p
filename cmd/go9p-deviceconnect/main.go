@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/lionkov/go9p/cmd/internal/cli9p"
+	"github.com/lionkov/go9p/p"
 	"github.com/lionkov/go9p/p/clnt"
 )
 
@@ -286,6 +287,15 @@ func cmdCall(stdout, stderr io.Writer, args []string) int {
 	errPath := path.Join(callDir, "error")
 	streamPath := path.Join(callDir, "stream")
 
+	// Keep ctl open until after reading response/stream. The server GC's the
+	// session directory when the last ctl reference is closed.
+	ctl, err := c.FOpen(ctlPath, p.OWRITE)
+	if err != nil {
+		dief(stderr, "open ctl: %v", err)
+		return 2
+	}
+	defer ctl.Close()
+
 	if len(req) != 0 {
 		if err := cli9p.WriteAll(c, dataPath, req, true); err != nil {
 			dief(stderr, "write request data: %v", err)
@@ -297,7 +307,7 @@ func cmdCall(stdout, stderr io.Writer, args []string) int {
 	if stream {
 		ctlCmd = "stream\n"
 	}
-	if err := cli9p.WriteAll(c, ctlPath, []byte(ctlCmd), true); err != nil {
+	if _, err := ctl.Write([]byte(ctlCmd)); err != nil {
 		// Try to surface richer error.
 		if eb, e2 := cli9p.ReadAll(c, errPath); e2 == nil {
 			msg := strings.TrimSpace(string(eb))
